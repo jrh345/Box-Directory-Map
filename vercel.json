@@ -1,20 +1,13 @@
 {
   "version": 2,
-  "routes": [
+  "rewrites": [
     {
-      "handle": "filesystem"
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
     },
     {
-      "src": "/api/statuses",
-      "dest": "/api/statuses.js"
-    },
-    {
-      "src": "/api/map-state",
-      "dest": "/api/map-state.js"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
