@@ -1,0 +1,20 @@
+{
+  "version": 2,
+  "routes": [
+    {
+      "handle": "filesystem"
+    },
+    {
+      "src": "/api/statuses",
+      "dest": "/api/statuses.js"
+    },
+    {
+      "src": "/api/map-state",
+      "dest": "/api/map-state.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/index.html"
+    }
+  ]
+}
