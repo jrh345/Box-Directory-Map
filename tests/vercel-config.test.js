@@ -6,15 +6,15 @@ const path = require('node:path');
 const repoRoot = path.resolve(__dirname, '..');
 const vercelConfig = JSON.parse(fs.readFileSync(path.join(repoRoot, 'vercel.json'), 'utf8'));
 
-test('vercel config rewrites the root to index.html', () => {
-  assert.ok(Array.isArray(vercelConfig.rewrites), 'expected rewrites array');
-  const rootRewrite = vercelConfig.rewrites.find((entry) => entry.source === '/(.*)');
-  assert.ok(rootRewrite, 'expected a root rewrite');
-  assert.equal(rootRewrite.destination, '/index.html');
+test('vercel config serves index.html for the app root', () => {
+  assert.ok(Array.isArray(vercelConfig.routes), 'expected routes array');
+  const rootRoute = vercelConfig.routes.find((entry) => entry.src === '/(.*)');
+  assert.ok(rootRoute, 'expected a root route');
+  assert.equal(rootRoute.dest, '/index.html');
 });
 
-test('vercel config routes API paths to API handlers', () => {
-  const apiRewrite = vercelConfig.rewrites.find((entry) => entry.source === '/api/(.*)');
-  assert.ok(apiRewrite, 'expected an API rewrite');
-  assert.equal(apiRewrite.destination, '/api/$1');
+test('vercel config routes API paths to the API handlers', () => {
+  const apiRoute = vercelConfig.routes.find((entry) => entry.src === '/api/(.*)');
+  assert.ok(apiRoute, 'expected an API route');
+  assert.equal(apiRoute.dest, '/api/$1');
 });
