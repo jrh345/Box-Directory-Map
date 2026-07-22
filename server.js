@@ -60,101 +60,102 @@ function sendJson(res, statusCode, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function serveStaticFile(res, filePath) {
+async function serveStaticFile(res, filePath) {
   const resolvedPath = path.resolve(ROOT_DIR, filePath);
   if (!resolvedPath.startsWith(ROOT_DIR)) {
     sendJson(res, 403, { error: 'Forbidden' });
     return;
   }
 
-  fs.readFile(resolvedPath, (error, data) => {
-    if (error) {
-      sendJson(res, 404, { error: 'Not found' });
-      return;
-    }
-
+  try {
+    const data = await fs.promises.readFile(resolvedPath);
     const ext = path.extname(resolvedPath).toLowerCase();
     res.writeHead(200, {
       'Content-Type': MIME_TYPES[ext] || 'application/octet-stream',
       'Cache-Control': 'no-cache',
     });
     res.end(data);
+  } catch {
+    sendJson(res, 404, { error: 'Not found' });
+  }
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+    });
+    req.on('end', () => resolve(body));
+    req.on('error', reject);
   });
 }
 
+async function handleRequest(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+
+  if (url.pathname === '/api/statuses') {
+    if (req.method === 'GET') {
+      sendJson(res, 200, readStore());
+      return;
+    }
+
+    if (req.method === 'PUT') {
+      try {
+        const body = await readBody(req);
+        const payload = JSON.parse(body || '{}');
+        const normalizedStatuses = normalizeStatusPayload(payload);
+        writeStore({ statuses: normalizedStatuses });
+        sendJson(res, 200, readStore());
+      } catch {
+        sendJson(res, 400, { error: 'Invalid JSON body' });
+      }
+      return;
+    }
+
+    if (req.method === 'OPTIONS') {
+      sendJson(res, 204, {});
+      return;
+    }
+  }
+
+  if (url.pathname === '/api/map-state') {
+    if (req.method === 'GET') {
+      sendJson(res, 200, readStore());
+      return;
+    }
+
+    if (req.method === 'PUT') {
+      try {
+        const body = await readBody(req);
+        const payload = JSON.parse(body || '{}');
+        const normalizedStatuses = normalizeStatusPayload(payload);
+        const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+        writeStore({ statuses: normalizedStatuses, rows });
+        sendJson(res, 200, readStore());
+      } catch {
+        sendJson(res, 400, { error: 'Invalid JSON body' });
+      }
+      return;
+    }
+
+    if (req.method === 'OPTIONS') {
+      sendJson(res, 204, {});
+      return;
+    }
+  }
+
+  let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
+  if (filePath.startsWith('/')) filePath = filePath.slice(1);
+
+  await serveStaticFile(res, filePath);
+}
+
 function createServer() {
-  return http.createServer(async (req, res) => {
-    const url = new URL(req.url, `http://${req.headers.host}`);
-
-    if (url.pathname === '/api/statuses') {
-      if (req.method === 'GET') {
-        sendJson(res, 200, readStore());
-        return;
-      }
-
-      if (req.method === 'PUT') {
-        let body = '';
-        req.on('data', (chunk) => {
-          body += chunk;
-        });
-        req.on('end', () => {
-          try {
-            const payload = JSON.parse(body || '{}');
-            const normalizedStatuses = normalizeStatusPayload(payload);
-            if (Object.keys(normalizedStatuses).length >= 0) {
-              writeStore({ statuses: normalizedStatuses });
-              sendJson(res, 200, readStore());
-              return;
-            }
-            sendJson(res, 400, { error: 'Expected a JSON object' });
-          } catch {
-            sendJson(res, 400, { error: 'Invalid JSON body' });
-          }
-        });
-        return;
-      }
-
-      if (req.method === 'OPTIONS') {
-        sendJson(res, 204, {});
-        return;
-      }
-    }
-
-    if (url.pathname === '/api/map-state') {
-      if (req.method === 'GET') {
-        sendJson(res, 200, readStore());
-        return;
-      }
-
-      if (req.method === 'PUT') {
-        let body = '';
-        req.on('data', (chunk) => {
-          body += chunk;
-        });
-        req.on('end', () => {
-          try {
-            const payload = JSON.parse(body || '{}');
-            const normalizedStatuses = normalizeStatusPayload(payload);
-            const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-            writeStore({ statuses: normalizedStatuses, rows });
-            sendJson(res, 200, readStore());
-          } catch {
-            sendJson(res, 400, { error: 'Invalid JSON body' });
-          }
-        });
-        return;
-      }
-
-      if (req.method === 'OPTIONS') {
-        sendJson(res, 204, {});
-        return;
-      }
-    }
-
-    let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
-    if (filePath.startsWith('/')) filePath = filePath.slice(1);
-
-    serveStaticFile(res, filePath);
+  return http.createServer((req, res) => {
+    handleRequest(req, res).catch(() => {
+      sendJson(res, 500, { error: 'Internal server error' });
+    });
   });
 }
 
@@ -165,4 +166,5 @@ if (require.main === module) {
   });
 }
 
-module.exports = createServer;
+module.exports = handleRequest;
+module.exports.createServer = createServer;
