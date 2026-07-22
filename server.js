@@ -82,7 +82,8 @@ function serveStaticFile(res, filePath) {
   });
 }
 
-const server = http.createServer(async (req, res) => {
+function createServer() {
+  return http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
   if (url.pathname === '/api/statuses') {
@@ -156,6 +157,14 @@ const server = http.createServer(async (req, res) => {
   serveStaticFile(res, filePath);
 });
 
-server.listen(PORT, () => {
-  console.log(`Drive audit map server running at http://localhost:${PORT}`);
-});
+  });
+}
+
+if (require.main === module) {
+  const server = createServer();
+  server.listen(PORT, () => {
+    console.log(`Drive audit map server running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = createServer;
