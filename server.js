@@ -119,6 +119,37 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  if (url.pathname === '/api/map-state') {
+    if (req.method === 'GET') {
+      sendJson(res, 200, readStore());
+      return;
+    }
+
+    if (req.method === 'PUT') {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+      });
+      req.on('end', () => {
+        try {
+          const payload = JSON.parse(body || '{}');
+          const normalizedStatuses = normalizeStatusPayload(payload);
+          const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+          writeStore({ statuses: normalizedStatuses, rows });
+          sendJson(res, 200, readStore());
+        } catch {
+          sendJson(res, 400, { error: 'Invalid JSON body' });
+        }
+      });
+      return;
+    }
+
+    if (req.method === 'OPTIONS') {
+      sendJson(res, 204, {});
+      return;
+    }
+  }
+
   let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
   if (filePath.startsWith('/')) filePath = filePath.slice(1);
 

@@ -7,9 +7,22 @@ const resetViewButton = document.getElementById('resetView');
 const shareButton = document.getElementById('shareLink');
 
 const STORAGE_KEY = 'drive-audit-map-statuses';
-const STATUS_ENDPOINT = (typeof window !== 'undefined' && window.DRIVE_AUDIT_API_URL)
-  ? window.DRIVE_AUDIT_API_URL
-  : '/api/statuses';
+function resolveApiEndpoint(path) {
+  if (typeof window !== 'undefined' && window.DRIVE_AUDIT_API_URL) {
+    const configured = window.DRIVE_AUDIT_API_URL;
+    if (configured.endsWith('/statuses')) {
+      return configured.replace(/\/statuses$/, path);
+    }
+    if (configured.endsWith('/map-state')) {
+      return configured.replace(/\/map-state$/, path);
+    }
+    return `${configured}${path}`;
+  }
+
+  return `/api${path}`;
+}
+const STATUS_ENDPOINT = resolveApiEndpoint('/statuses');
+const MAP_STATE_ENDPOINT = resolveApiEndpoint('/map-state');
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const CARD_WIDTH = 220;
 const CARD_HEIGHT = 72;
@@ -82,6 +95,58 @@ async function saveStatuses() {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ statuses }),
+    });
+  } catch {
+    // Ignore remote save failures and keep the local browser state as the fallback.
+  }
+
+  try {
+    await fetch(MAP_STATE_ENDPOINT, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ statuses, rows: currentRows }),
+    });
+  } catch {
+    // Ignore remote save failures and keep the local browser state as the fallback.
+  }
+}
+
+async function loadSharedStateFromServer() {
+  try {
+    const response = await fetch(MAP_STATE_ENDPOINT, { cache: 'no-store' });
+    if (!response.ok) return null;
+
+    const payload = await response.json();
+    const serverStatuses = payload?.statuses && typeof payload.statuses === 'object'
+      ? payload.statuses
+      : (payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {});
+    const serverRows = Array.isArray(payload?.rows) ? payload.rows : [];
+
+    if (Object.keys(serverStatuses).length === 0 && serverRows.length === 0) {
+      return null;
+    }
+
+    statuses = serverStatuses;
+    currentRows = serverRows;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+    return { statuses, rows: serverRows };
+  } catch {
+    return null;
+  }
+}
+
+async function saveSharedStateToServer() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+
+  try {
+    await fetch(MAP_STATE_ENDPOINT, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ statuses, rows: currentRows }),
     });
   } catch {
     // Ignore remote save failures and keep the local browser state as the fallback.
@@ -485,6 +550,12 @@ function loadSharedStateFromUrl() {
 
 async function bootstrapApp() {
   statuses = await loadStatuses();
+  const serverState = await loadSharedStateFromServer();
+  if (serverState) {
+    applySharedState(serverState);
+    return;
+  }
+
   const sharedState = loadSharedStateFromUrl();
   if (sharedState) {
     applySharedState(sharedState);
@@ -533,6 +604,7 @@ csvFileInput.addEventListener('change', async (event) => {
   currentRows = rows;
   await syncStatusesFromServer();
   initializeFromRows(rows);
+  await saveSharedStateToServer();
   lastSharedPayload = { statuses, rows };
 });
 
