@@ -48,6 +48,18 @@ async function loadStatuses() {
   const fallback = localRaw ? JSON.parse(localRaw) : {};
 
   try {
+    const sharedState = await window.DriveAuditMapSharedStorage?.getState();
+    if (sharedState?.statuses) {
+      statuses = { ...fallback, ...sharedState.statuses };
+      currentRows = Array.isArray(sharedState.rows) ? sharedState.rows : [];
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+      return statuses;
+    }
+  } catch {
+    // Ignore shared storage failures and continue with local state.
+  }
+
+  try {
     const response = await fetch(STATUS_ENDPOINT, { cache: 'no-store' });
     if (!response.ok) return fallback;
 
@@ -67,6 +79,18 @@ async function loadStatuses() {
 }
 
 async function syncStatusesFromServer() {
+  try {
+    const sharedState = await window.DriveAuditMapSharedStorage?.getState();
+    if (sharedState?.statuses) {
+      statuses = sharedState.statuses;
+      currentRows = Array.isArray(sharedState.rows) ? sharedState.rows : [];
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+      return;
+    }
+  } catch {
+    // Ignore shared storage failures and continue with local state.
+  }
+
   try {
     const response = await fetch(STATUS_ENDPOINT, { cache: 'no-store' });
     if (!response.ok) return;
@@ -89,6 +113,12 @@ async function saveStatuses() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
 
   try {
+    await window.DriveAuditMapSharedStorage?.saveStatuses(statuses);
+  } catch {
+    // Ignore shared storage failures and keep the local browser state as the fallback.
+  }
+
+  try {
     await fetch(STATUS_ENDPOINT, {
       method: 'PUT',
       headers: {
@@ -99,21 +129,21 @@ async function saveStatuses() {
   } catch {
     // Ignore remote save failures and keep the local browser state as the fallback.
   }
-
-  try {
-    await fetch(MAP_STATE_ENDPOINT, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ statuses, rows: currentRows }),
-    });
-  } catch {
-    // Ignore remote save failures and keep the local browser state as the fallback.
-  }
 }
 
 async function loadSharedStateFromServer() {
+  try {
+    const sharedState = await window.DriveAuditMapSharedStorage?.getState();
+    if (sharedState?.statuses || (Array.isArray(sharedState?.rows) && sharedState.rows.length > 0)) {
+      statuses = sharedState.statuses || {};
+      currentRows = Array.isArray(sharedState.rows) ? sharedState.rows : [];
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+      return { statuses, rows: currentRows };
+    }
+  } catch {
+    // Ignore shared storage failures and continue with local state.
+  }
+
   try {
     const response = await fetch(MAP_STATE_ENDPOINT, { cache: 'no-store' });
     if (!response.ok) return null;
@@ -139,6 +169,12 @@ async function loadSharedStateFromServer() {
 
 async function saveSharedStateToServer() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+
+  try {
+    await window.DriveAuditMapSharedStorage?.saveState({ statuses, rows: currentRows });
+  } catch {
+    // Ignore shared storage failures and keep the local browser state as the fallback.
+  }
 
   try {
     await fetch(MAP_STATE_ENDPOINT, {

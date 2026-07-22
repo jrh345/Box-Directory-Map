@@ -8,13 +8,24 @@ The UI can be hosted on GitHub Pages because it is a plain HTML/CSS/JS app.
 
 ## Shared state
 
-The app is wired to read and write status data through a JSON API at `/api/statuses`.
+The app can persist shared state through either:
 
-For full team sharing, the frontend should point to a publicly hosted backend endpoint, for example:
+- a backend API at `/api/map-state` and `/api/statuses`, or
+- a Supabase table named `shared_map_state` when you define the following globals before the app loads:
 
 ```html
 <script>
-  window.DRIVE_AUDIT_API_URL = 'https://your-shared-api.example.com/api/statuses';
+  window.DRIVE_AUDIT_SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co';
+  window.DRIVE_AUDIT_SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';
+</script>
+<script src="shared-storage.js"></script>
+```
+
+For full team sharing, the frontend can also point to a publicly hosted backend endpoint:
+
+```html
+<script>
+  window.DRIVE_AUDIT_API_URL = 'https://your-shared-api.example.com/api';
 </script>
 ```
 
