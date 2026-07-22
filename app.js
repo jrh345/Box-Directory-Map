@@ -4,6 +4,7 @@ const expandAllButton = document.getElementById('expandAll');
 const zoomInButton = document.getElementById('zoomIn');
 const zoomOutButton = document.getElementById('zoomOut');
 const resetViewButton = document.getElementById('resetView');
+const shareButton = document.getElementById('shareLink');
 
 const STORAGE_KEY = 'drive-audit-map-statuses';
 const STATUS_ENDPOINT = (typeof window !== 'undefined' && window.DRIVE_AUDIT_API_URL)
@@ -18,6 +19,8 @@ const HORIZONTAL_STEP = 280;
 let treeState = [];
 let expandedPaths = new Set();
 let statuses = {};
+let currentRows = [];
+let lastSharedPayload = null;
 let viewState = {
   scale: 1,
   offsetX: 40,
@@ -451,11 +454,74 @@ function initializeFromRows(rows) {
   renderMap(treeState);
 }
 
+function applySharedState(sharedState) {
+  if (!sharedState) return false;
+
+  if (sharedState.statuses && typeof sharedState.statuses === 'object') {
+    statuses = sharedState.statuses;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+  }
+
+  if (sharedState.rows && Array.isArray(sharedState.rows) && sharedState.rows.length > 0) {
+    currentRows = sharedState.rows;
+    initializeFromRows(currentRows);
+    return true;
+  }
+
+  return false;
+}
+
+function loadSharedStateFromUrl() {
+  if (!window.location.hash) return null;
+
+  const shareMatch = window.location.hash.match(/share=([^&]+)/);
+  if (!shareMatch) return null;
+
+  const shareState = window.DriveAuditMapShareState?.decodeSharedState(shareMatch[1]);
+  if (!shareState) return null;
+
+  return shareState;
+}
+
 async function bootstrapApp() {
   statuses = await loadStatuses();
+  const sharedState = loadSharedStateFromUrl();
+  if (sharedState) {
+    applySharedState(sharedState);
+    return;
+  }
+
   if (treeState.length > 0) {
     renderMap(treeState);
   }
+}
+
+async function shareCurrentState() {
+  if (!treeState.length || !currentRows.length) {
+    return;
+  }
+
+  const payload = {
+    statuses,
+    rows: currentRows,
+  };
+
+  const shareUrl = window.DriveAuditMapShareState?.buildShareUrl(window.location, payload);
+  if (!shareUrl) return;
+
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(shareUrl);
+  }
+
+  if (shareButton) {
+    const originalText = shareButton.textContent;
+    shareButton.textContent = 'Copied!';
+    window.setTimeout(() => {
+      shareButton.textContent = originalText;
+    }, 1500);
+  }
+
+  window.history.replaceState({}, '', shareUrl);
 }
 
 csvFileInput.addEventListener('change', async (event) => {
@@ -464,8 +530,10 @@ csvFileInput.addEventListener('change', async (event) => {
 
   const text = await file.text();
   const rows = parseCSV(text);
+  currentRows = rows;
   await syncStatusesFromServer();
   initializeFromRows(rows);
+  lastSharedPayload = { statuses, rows };
 });
 
 expandAllButton.addEventListener('click', () => {
@@ -490,6 +558,10 @@ resetViewButton.addEventListener('click', () => {
   viewState.offsetX = 40;
   viewState.offsetY = 40;
   renderMap(treeState);
+});
+
+shareButton?.addEventListener('click', () => {
+  shareCurrentState();
 });
 
 bootstrapApp();

@@ -13,10 +13,13 @@
           <h1>Cloud Drive Audit Map</h1>
           <p>Import the inventory snapshot and review the structure as an expandable map.</p>
         </div>
-        <label class="upload-button">
-          <input id="csvFile" type="file" accept=".csv" />
-          <span>Import CSV</span>
-        </label>
+        <div class="topbar-actions">
+          <button id="shareLink" class="ghost-button" type="button">Copy share link</button>
+          <label class="upload-button">
+            <input id="csvFile" type="file" accept=".csv" />
+            <span>Import CSV</span>
+          </label>
+        </div>
       </header>
 
       <main class="content-grid">
@@ -50,6 +53,7 @@
       </main>
     </div>
 
+    <script src="share-state.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

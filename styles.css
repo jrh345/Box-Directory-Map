@@ -35,6 +35,13 @@ body {
   margin-bottom: 20px;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 h1, h2, p {
   margin: 0;
 }
