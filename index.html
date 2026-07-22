@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cloud Drive Audit Map</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div>
+          <h1>Cloud Drive Audit Map</h1>
+          <p>Import the inventory snapshot and review the structure as an expandable map.</p>
+        </div>
+        <label class="upload-button">
+          <input id="csvFile" type="file" accept=".csv" />
+          <span>Import CSV</span>
+        </label>
+      </header>
+
+      <main class="content-grid">
+        <section class="panel">
+          <div class="panel-header">
+            <h2>Audit Map</h2>
+            <div class="panel-actions">
+              <button id="zoomOut" class="ghost-button" type="button">−</button>
+              <button id="zoomIn" class="ghost-button" type="button">+</button>
+              <button id="resetView" class="ghost-button" type="button">Reset view</button>
+              <button id="expandAll" class="ghost-button" type="button">Expand all</button>
+            </div>
+          </div>
+          <div id="treeRoot" class="map-root"></div>
+        </section>
+
+        <aside class="panel sidebar">
+          <h2>Instructions</h2>
+          <ul>
+            <li>Import your Box inventory CSV to build the directory map.</li>
+            <li>Use the green/yellow/red controls on each node to mark review status.</li>
+            <li>Click a selected color again to clear it and leave the node transparent.</li>
+            <li>Folders can be collapsed or expanded to move through the structure.</li>
+          </ul>
+          <div class="legend">
+            <div><span class="swatch green"></span> Green</div>
+            <div><span class="swatch yellow"></span> Yellow</div>
+            <div><span class="swatch red"></span> Red</div>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
