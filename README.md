@@ -40,7 +40,7 @@ python -m http.server 8001
 Or use the included Node server if Node is available in your environment:
 
 ```bash
-node server.js
+node local-server.js
 ```
 
 ## Deployment summary
