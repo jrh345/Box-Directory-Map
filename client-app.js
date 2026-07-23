@@ -494,32 +494,71 @@ async function loadRowsFromDatabase() {
   }
 }
 
+function setShareButtonText(text, timeoutMs = 1500) {
+  if (!shareButton) return;
+  const originalText = shareButton.dataset.originalText || shareButton.textContent || 'Copy share link';
+  shareButton.dataset.originalText = originalText;
+  shareButton.textContent = text;
+
+  if (timeoutMs > 0) {
+    window.setTimeout(() => {
+      shareButton.textContent = originalText;
+    }, timeoutMs);
+  }
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '-9999px';
+  textarea.style.left = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+
+  if (!copied) {
+    throw new Error('Clipboard write not available');
+  }
+}
+
 async function shareCurrentState() {
-  if (!treeState.length || !currentRows.length) {
+  if (!treeState.length) {
+    setShareButtonText('Nothing to share', 1800);
     return;
   }
 
   const payload = {
     statuses,
-    rows: currentRows,
   };
 
   const shareUrl = window.DriveAuditMapShareState?.buildShareUrl(window.location, payload);
-  if (!shareUrl) return;
-
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(shareUrl);
+  if (!shareUrl) {
+    setShareButtonText('Share unavailable', 1800);
+    return;
   }
 
-  if (shareButton) {
-    const originalText = shareButton.textContent;
-    shareButton.textContent = 'Copied!';
-    window.setTimeout(() => {
-      shareButton.textContent = originalText;
-    }, 1500);
-  }
+  try {
+    await copyTextToClipboard(shareUrl);
 
-  window.history.replaceState({}, '', shareUrl);
+    try {
+      window.history.replaceState({}, '', shareUrl);
+    } catch {
+      // URL updates can fail on very long hashes; copy still succeeded.
+    }
+
+    setShareButtonText('Copied!');
+  } catch {
+    setShareButtonText('Copy failed', 2200);
+  }
 }
 
 expandAllButton.addEventListener('click', () => {
