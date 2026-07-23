@@ -6,16 +6,8 @@
       "dest": "/api/$1"
     },
     {
-      "src": "/favicon.(ico|png)",
-      "dest": "/favicon.ico"
-    },
-    {
-      "src": "/(.*\\.(css|js|csv|json|ico|png|svg))",
-      "dest": "/$1"
-    },
-    {
       "src": "/(.*)",
-      "dest": "/index.html"
+      "dest": "/api/index"
     }
   ]
 }
