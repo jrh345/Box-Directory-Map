@@ -1,5 +1,4 @@
 const treeRoot = document.getElementById('treeRoot');
-const loadSnapshotButton = document.getElementById('loadSnapshot');
 const expandAllButton = document.getElementById('expandAll');
 const zoomInButton = document.getElementById('zoomIn');
 const zoomOutButton = document.getElementById('zoomOut');
@@ -29,7 +28,6 @@ function resolveApiEndpoint(path) {
   return `/api${path}`;
 }
 const STATUS_ENDPOINT = resolveApiEndpoint('/statuses');
-const MAP_STATE_ENDPOINT = resolveApiEndpoint('/map-state');
 const TREE_DATA_ENDPOINT = resolveApiEndpoint('/tree-data');
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const CARD_WIDTH = 220;
@@ -59,7 +57,6 @@ async function loadStatuses() {
     const sharedState = await window.DriveAuditMapSharedStorage?.getState();
     if (sharedState?.statuses) {
       statuses = { ...fallback, ...sharedState.statuses };
-      currentRows = Array.isArray(sharedState.rows) ? sharedState.rows : [];
       localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
       return statuses;
     }
@@ -91,7 +88,6 @@ async function syncStatusesFromServer() {
     const sharedState = await window.DriveAuditMapSharedStorage?.getState();
     if (sharedState?.statuses) {
       statuses = sharedState.statuses;
-      currentRows = Array.isArray(sharedState.rows) ? sharedState.rows : [];
       localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
       return;
     }
@@ -133,64 +129,6 @@ async function saveStatuses() {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ statuses }),
-    });
-  } catch {
-    // Ignore remote save failures and keep the local browser state as the fallback.
-  }
-}
-
-async function loadSharedStateFromServer() {
-  try {
-    const sharedState = await window.DriveAuditMapSharedStorage?.getState();
-    if (sharedState?.statuses || (Array.isArray(sharedState?.rows) && sharedState.rows.length > 0)) {
-      statuses = sharedState.statuses || {};
-      currentRows = Array.isArray(sharedState.rows) ? sharedState.rows : [];
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
-      return { statuses, rows: currentRows };
-    }
-  } catch {
-    // Ignore shared storage failures and continue with local state.
-  }
-
-  try {
-    const response = await fetch(MAP_STATE_ENDPOINT, { cache: 'no-store' });
-    if (!response.ok) return null;
-
-    const payload = await response.json();
-    const serverStatuses = payload?.statuses && typeof payload.statuses === 'object'
-      ? payload.statuses
-      : (payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {});
-    const serverRows = Array.isArray(payload?.rows) ? payload.rows : [];
-
-    if (Object.keys(serverStatuses).length === 0 && serverRows.length === 0) {
-      return null;
-    }
-
-    statuses = serverStatuses;
-    currentRows = serverRows;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
-    return { statuses, rows: serverRows };
-  } catch {
-    return null;
-  }
-}
-
-async function saveSharedStateToServer() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
-
-  try {
-    await window.DriveAuditMapSharedStorage?.saveState({ statuses, rows: currentRows });
-  } catch {
-    // Ignore shared storage failures and keep the local browser state as the fallback.
-  }
-
-  try {
-    await fetch(MAP_STATE_ENDPOINT, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ statuses, rows: currentRows }),
     });
   } catch {
     // Ignore remote save failures and keep the local browser state as the fallback.
@@ -514,60 +452,12 @@ function initializeFromRows(rows) {
   renderMap(treeState);
 }
 
-function applySharedState(sharedState) {
-  if (!sharedState) return false;
-
-  if (sharedState.statuses && typeof sharedState.statuses === 'object') {
-    statuses = sharedState.statuses;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
-  }
-
-  if (sharedState.rows && Array.isArray(sharedState.rows) && sharedState.rows.length > 0) {
-    currentRows = sharedState.rows;
-    initializeFromRows(currentRows);
-    return true;
-  }
-
-  return false;
-}
-
-function loadSharedStateFromUrl() {
-  if (!window.location.hash) return null;
-
-  const shareMatch = window.location.hash.match(/share=([^&]+)/);
-  if (!shareMatch) return null;
-
-  const shareState = window.DriveAuditMapShareState?.decodeSharedState(shareMatch[1]);
-  if (!shareState) return null;
-
-  return shareState;
-}
-
 async function bootstrapApp() {
   logDebug('Bootstrap start', { path: window.location.pathname + window.location.search + window.location.hash });
   try {
     statuses = await loadStatuses();
     logDebug('Statuses loaded', { statusCount: Object.keys(statuses).length });
-    const serverState = await loadSharedStateFromServer();
-    if (serverState) {
-      logDebug('Loaded shared state from server', { rowCount: serverState.rows?.length || 0 });
-      applySharedState(serverState);
-      return;
-    }
-
-    const sharedState = loadSharedStateFromUrl();
-    if (sharedState) {
-      logDebug('Loaded shared state from URL', { rowCount: sharedState.rows?.length || 0 });
-      applySharedState(sharedState);
-      return;
-    }
-
-    if (treeState.length > 0) {
-      renderMap(treeState);
-    } else {
-      logDebug('Bootstrap complete with empty tree state; attempting SQLite load');
-      await loadRowsFromDatabase();
-    }
+    await loadRowsFromDatabase();
   } catch (error) {
     logDebug('Bootstrap failed', { message: error?.message, stack: error?.stack });
     console.error('Drive audit bootstrap failed', error);
@@ -595,7 +485,6 @@ async function loadRowsFromDatabase() {
     currentRows = rows;
     await syncStatusesFromServer();
     initializeFromRows(rows);
-    await saveSharedStateToServer();
     lastSharedPayload = { statuses, rows };
     logDebug('SQLite load complete', { rowCount: rows.length });
   } catch (error) {
@@ -632,10 +521,6 @@ async function shareCurrentState() {
 
   window.history.replaceState({}, '', shareUrl);
 }
-
-loadSnapshotButton?.addEventListener('click', () => {
-  loadRowsFromDatabase();
-});
 
 expandAllButton.addEventListener('click', () => {
   treeState.forEach((node) => {

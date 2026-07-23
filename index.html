@@ -264,11 +264,10 @@
       <header class="topbar">
         <div>
           <h1>Cloud Drive Audit Map</h1>
-          <p>Import the inventory snapshot and review the structure as an expandable map.</p>
+          <p>Review the structure from the shared SQLite snapshot as an expandable map.</p>
         </div>
         <div class="topbar-actions">
           <button id="shareLink" class="ghost-button" type="button">Copy share link</button>
-          <button id="loadSnapshot" class="upload-button" type="button">Load from SQLite</button>
         </div>
       </header>
 
@@ -284,14 +283,14 @@
             </div>
           </div>
           <div id="treeRoot" class="map-root">
-            <div class="empty-state">Load the SQLite snapshot to generate the directory map.</div>
+            <div class="empty-state">Loading SQLite snapshot...</div>
           </div>
         </section>
 
         <aside class="panel sidebar">
           <h2>Instructions</h2>
           <ul>
-            <li>Click Load from SQLite to build the directory map from the database snapshot.</li>
+            <li>The map loads automatically from the SQLite database snapshot.</li>
             <li>Use the green/yellow/red controls on each node to mark review status.</li>
             <li>Click a selected color again to clear it and leave the node transparent.</li>
             <li>Folders can be collapsed or expanded to move through the structure.</li>

@@ -5,7 +5,8 @@
   "description": "Shared cloud-drive audit map",
   "scripts": {
     "start": "node local-server.js",
-    "dev": "node local-server.js",
+    "dev": "python local_api_server.py",
+    "dev:node": "node local-server.js",
     "dev:static": "python -m http.server 8000"
   }
 }

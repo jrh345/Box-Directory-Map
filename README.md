@@ -37,6 +37,14 @@ Or, if you host the frontend through GitHub Pages and the API through another se
 npm run dev
 ```
 
+`npm run dev` starts a Python local API server that serves both static files and `/api/tree-data` from SQLite.
+
+Node-based local server is still available if needed:
+
+```bash
+npm run dev:node
+```
+
 Optional static-only mode (no API routes):
 
 ```bash
@@ -79,7 +87,7 @@ Then run:
 npm run dev
 ```
 
-Click `Load from SQLite` in the app UI to load and render rows.
+The app now loads rows from SQLite automatically on startup.
 
 ## Deployment summary
 
