@@ -268,10 +268,7 @@
         </div>
         <div class="topbar-actions">
           <button id="shareLink" class="ghost-button" type="button">Copy share link</button>
-          <label class="upload-button">
-            <input id="csvFile" type="file" accept=".csv" />
-            <span>Import CSV</span>
-          </label>
+          <button id="loadSnapshot" class="upload-button" type="button">Load from SQLite</button>
         </div>
       </header>
 
@@ -287,14 +284,14 @@
             </div>
           </div>
           <div id="treeRoot" class="map-root">
-            <div class="empty-state">Import a CSV to generate the directory map.</div>
+            <div class="empty-state">Load the SQLite snapshot to generate the directory map.</div>
           </div>
         </section>
 
         <aside class="panel sidebar">
           <h2>Instructions</h2>
           <ul>
-            <li>Import your Box inventory CSV to build the directory map.</li>
+            <li>Click Load from SQLite to build the directory map from the database snapshot.</li>
             <li>Use the green/yellow/red controls on each node to mark review status.</li>
             <li>Click a selected color again to clear it and leave the node transparent.</li>
             <li>Folders can be collapsed or expanded to move through the structure.</li>

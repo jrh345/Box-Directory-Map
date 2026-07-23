@@ -1,5 +1,10 @@
 {
   "version": 2,
+  "functions": {
+    "api/tree-data.js": {
+      "includeFiles": "data/**"
+    }
+  },
   "builds": [
     {
       "src": "index.html",
@@ -27,6 +32,10 @@
     },
     {
       "src": "tmp-mini-tree.csv",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "data/**/*.db",
       "use": "@vercel/static"
     },
     {

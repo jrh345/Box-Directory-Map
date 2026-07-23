@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { readRowsFromSqlite, DB_PATH } = require('./lib/sqlite-tree-data');
 
 const PORT = process.env.PORT || 3000;
 const ROOT_DIR = __dirname;
@@ -135,6 +136,27 @@ async function handleRequest(req, res) {
         sendJson(res, 200, readStore());
       } catch {
         sendJson(res, 400, { error: 'Invalid JSON body' });
+      }
+      return;
+    }
+
+    if (req.method === 'OPTIONS') {
+      sendJson(res, 204, {});
+      return;
+    }
+  }
+
+  if (url.pathname === '/api/tree-data') {
+    if (req.method === 'GET') {
+      try {
+        const rows = readRowsFromSqlite();
+        sendJson(res, 200, {
+          rows,
+          rowCount: rows.length,
+          source: DB_PATH,
+        });
+      } catch (error) {
+        sendJson(res, 500, { error: error?.message || 'Failed to read SQLite data' });
       }
       return;
     }

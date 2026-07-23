@@ -1,5 +1,5 @@
 const treeRoot = document.getElementById('treeRoot');
-const csvFileInput = document.getElementById('csvFile');
+const loadSnapshotButton = document.getElementById('loadSnapshot');
 const expandAllButton = document.getElementById('expandAll');
 const zoomInButton = document.getElementById('zoomIn');
 const zoomOutButton = document.getElementById('zoomOut');
@@ -30,6 +30,7 @@ function resolveApiEndpoint(path) {
 }
 const STATUS_ENDPOINT = resolveApiEndpoint('/statuses');
 const MAP_STATE_ENDPOINT = resolveApiEndpoint('/map-state');
+const TREE_DATA_ENDPOINT = resolveApiEndpoint('/tree-data');
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const CARD_WIDTH = 220;
 const CARD_HEIGHT = 72;
@@ -551,7 +552,7 @@ function renderMap(nodes) {
 function initializeFromRows(rows) {
   treeState = buildTree(rows);
   if (treeState.length === 0) {
-    treeRoot.innerHTML = '<p>No valid rows were found in the CSV</p>';
+    treeRoot.innerHTML = '<p>No valid rows were found in the SQLite snapshot.</p>';
     return;
   }
 
@@ -613,11 +614,43 @@ async function bootstrapApp() {
     if (treeState.length > 0) {
       renderMap(treeState);
     } else {
-      logDebug('Bootstrap complete with empty tree state');
+      logDebug('Bootstrap complete with empty tree state; attempting SQLite load');
+      await loadRowsFromDatabase();
     }
   } catch (error) {
     logDebug('Bootstrap failed', { message: error?.message, stack: error?.stack });
     console.error('Drive audit bootstrap failed', error);
+  }
+}
+
+async function loadRowsFromDatabase() {
+  logDebug('SQLite load start', { endpoint: TREE_DATA_ENDPOINT });
+
+  try {
+    const response = await fetch(TREE_DATA_ENDPOINT, { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`SQLite endpoint returned ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+    logDebug('SQLite rows received', { rowCount: rows.length, source: payload?.source || null });
+
+    if (rows.length === 0) {
+      treeRoot.innerHTML = '<div class="empty-state">SQLite snapshot is empty. Import data into the database first.</div>';
+      return;
+    }
+
+    currentRows = rows;
+    await syncStatusesFromServer();
+    initializeFromRows(rows);
+    await saveSharedStateToServer();
+    lastSharedPayload = { statuses, rows };
+    logDebug('SQLite load complete', { rowCount: rows.length });
+  } catch (error) {
+    logDebug('SQLite load failed', { message: error?.message, stack: error?.stack });
+    console.error('Drive audit SQLite load failed', error);
+    treeRoot.innerHTML = '<div class="empty-state">Failed to load SQLite snapshot. Check server logs and console details.</div>';
   }
 }
 
@@ -649,28 +682,8 @@ async function shareCurrentState() {
   window.history.replaceState({}, '', shareUrl);
 }
 
-csvFileInput.addEventListener('change', async (event) => {
-  const file = event.target.files?.[0];
-  if (!file) return;
-
-  logDebug('CSV import start', { name: file.name, size: file.size });
-
-  try {
-    const text = await file.text();
-    logDebug('CSV text loaded', { length: text.length });
-    const rows = parseCSV(text);
-    logDebug('CSV rows parsed', { rowCount: rows.length });
-    currentRows = rows;
-    await syncStatusesFromServer();
-    initializeFromRows(rows);
-    await saveSharedStateToServer();
-    lastSharedPayload = { statuses, rows };
-    logDebug('CSV import complete', { rowCount: rows.length });
-  } catch (error) {
-    logDebug('CSV import failed', { message: error?.message, stack: error?.stack });
-    console.error('Drive audit CSV import failed', error);
-    treeRoot.innerHTML = '<div class="empty-state">The CSV could not be imported. Check the console for details.</div>';
-  }
+loadSnapshotButton?.addEventListener('click', () => {
+  loadRowsFromDatabase();
 });
 
 expandAllButton.addEventListener('click', () => {

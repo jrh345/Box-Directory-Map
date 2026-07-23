@@ -34,14 +34,36 @@ Or, if you host the frontend through GitHub Pages and the API through another se
 ## Local development
 
 ```bash
-python -m http.server 8001
+npm run dev
 ```
 
-Or use the included Node server if Node is available in your environment:
+Optional static-only mode (no API routes):
 
 ```bash
-node local-server.js
+npm run dev:static
 ```
+
+## SQLite data source
+
+The map is now loaded from SQLite through `GET /api/tree-data`.
+
+Default database path:
+
+- `data/drive-audit-map.db`
+
+To seed the database from the included CSV sample:
+
+```bash
+python scripts/import_csv_to_sqlite.py
+```
+
+Then run:
+
+```bash
+npm run dev
+```
+
+Click `Load from SQLite` in the app UI to load and render rows.
 
 ## Deployment summary
 
