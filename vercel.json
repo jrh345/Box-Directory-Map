@@ -22,6 +22,10 @@
       "use": "@vercel/static"
     },
     {
+      "src": "config.js",
+      "use": "@vercel/static"
+    },
+    {
       "src": "favicon.ico",
       "use": "@vercel/static"
     },

@@ -109,6 +109,35 @@ Important hosting note:
 - Vercel serverless functions do not provide a durable shared writable filesystem for team-wide SQLite writes.
 - For true shared team writes, host this API on a persistent server/VM/container (or switch to a managed database like Postgres/Supabase).
 
+## Guaranteed shared team writes
+
+For guaranteed shared writes across clients, configure Supabase and use it as the status source of truth.
+
+1. Create table in Supabase:
+
+```sql
+create table if not exists shared_map_state (
+  id text primary key,
+  statuses jsonb not null default '{}'::jsonb,
+  rows jsonb not null default '[]'::jsonb
+);
+
+insert into shared_map_state (id, statuses, rows)
+values ('default', '{}'::jsonb, '[]'::jsonb)
+on conflict (id) do nothing;
+```
+
+2. Configure runtime values in `config.js`:
+
+```js
+window.DRIVE_AUDIT_SUPABASE_URL = 'https://YOUR_PROJECT_REF.supabase.co';
+window.DRIVE_AUDIT_SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';
+```
+
+3. Deploy and ensure all clients use the same deployed app URL.
+
+When configured, status writes/reads are persisted via Supabase and reflected across clients.
+
 ## Deployment summary
 
 1. Push this repo to GitHub.

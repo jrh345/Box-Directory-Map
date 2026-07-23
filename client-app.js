@@ -56,7 +56,7 @@ async function loadStatuses() {
   try {
     const sharedState = await window.DriveAuditMapSharedStorage?.getState();
     if (sharedState?.statuses) {
-      statuses = { ...fallback, ...sharedState.statuses };
+      statuses = sharedState.statuses;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
       return statuses;
     }

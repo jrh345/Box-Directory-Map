@@ -118,6 +118,19 @@
     });
   }
 
+  async function saveStatusesToSupabase(statuses) {
+    const config = getSupabaseConfig();
+    if (!config) return null;
+
+    const existing = (await getStateFromSupabase()) || { statuses: {}, rows: [] };
+    const payload = {
+      statuses: statuses || {},
+      rows: Array.isArray(existing.rows) ? existing.rows : [],
+    };
+
+    return saveStateToSupabase(payload);
+  }
+
   const adapter = {
     async getState() {
       try {
@@ -158,6 +171,13 @@
     },
 
     async saveStatuses(statuses) {
+      try {
+        const supabaseState = await saveStatusesToSupabase(statuses);
+        if (supabaseState) return supabaseState;
+      } catch {
+        // Ignore Supabase failures and fall back to API storage.
+      }
+
       try {
         await saveStatusesToApi(statuses);
       } catch {
