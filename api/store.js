@@ -1,10 +1,29 @@
 const { DatabaseSync } = require('node:sqlite');
+const fs = require('fs');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, '..', 'data', 'drive-audit-map.db');
+const SOURCE_DB_PATH = path.join(__dirname, '..', 'data', 'drive-audit-map.db');
+const RUNTIME_DB_PATH = process.env.VERCEL
+  ? '/tmp/drive-audit-map.db'
+  : SOURCE_DB_PATH;
+
+function ensureRuntimeDatabase() {
+  if (!process.env.VERCEL) {
+    return;
+  }
+
+  if (!fs.existsSync(RUNTIME_DB_PATH)) {
+    if (!fs.existsSync(SOURCE_DB_PATH)) {
+      throw new Error(`SQLite source database not found: ${SOURCE_DB_PATH}`);
+    }
+
+    fs.copyFileSync(SOURCE_DB_PATH, RUNTIME_DB_PATH);
+  }
+}
 
 function withDatabase(callback) {
-  const db = new DatabaseSync(DB_PATH);
+  ensureRuntimeDatabase();
+  const db = new DatabaseSync(RUNTIME_DB_PATH);
   try {
     db.exec('PRAGMA journal_mode = WAL;');
     db.exec('PRAGMA synchronous = NORMAL;');

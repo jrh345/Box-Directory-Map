@@ -48,8 +48,14 @@ module.exports = async (req, res) => {
 			const payload = await readJsonBody(req);
 			const next = setStatuses(payload || {});
 			sendJson(res, 200, next);
-		} catch {
-			sendJson(res, 400, { error: 'Invalid JSON body' });
+		} catch (error) {
+			const message = error?.message || '';
+			if (message === 'Invalid JSON') {
+				sendJson(res, 400, { error: 'Invalid JSON body' });
+				return;
+			}
+
+			sendJson(res, 500, { error: message || 'Failed to save statuses' });
 		}
 		return;
 	}
