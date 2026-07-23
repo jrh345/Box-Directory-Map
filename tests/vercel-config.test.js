@@ -12,9 +12,9 @@ test('vercel config uses builds (not functions)', () => {
 });
 
 test('tree-data build includes sqlite files', () => {
-  const treeDataBuild = vercelConfig.builds.find((entry) => entry.src === 'api/tree-data.js');
-  assert.ok(treeDataBuild, 'expected api/tree-data.js build config');
-  assert.equal(treeDataBuild.config?.includeFiles, 'data/**');
+  const apiBuild = vercelConfig.builds.find((entry) => entry.src === 'api/**/*.js');
+  assert.ok(apiBuild, 'expected api/**/*.js build config');
+  assert.equal(apiBuild.config?.includeFiles, 'data/**');
 });
 
 test('vercel config routes root to index.html', () => {
@@ -22,4 +22,10 @@ test('vercel config routes root to index.html', () => {
   const rootRoute = vercelConfig.routes.find((entry) => entry.src === '/(.*)');
   assert.ok(rootRoute, 'expected root route');
   assert.equal(rootRoute.dest, '/index.html');
+});
+
+test('vercel config routes api paths to .js files', () => {
+  const apiRoute = vercelConfig.routes.find((entry) => entry.src === '/api/(.*)');
+  assert.ok(apiRoute, 'expected api route');
+  assert.equal(apiRoute.dest, '/api/$1.js');
 });

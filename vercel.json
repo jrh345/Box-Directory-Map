@@ -26,21 +26,17 @@
       "use": "@vercel/static"
     },
     {
-      "src": "api/tree-data.js",
+      "src": "api/**/*.js",
       "use": "@vercel/node",
       "config": {
         "includeFiles": "data/**"
       }
-    },
-    {
-      "src": "api/**/*.js",
-      "use": "@vercel/node"
     }
   ],
   "routes": [
     {
       "src": "/api/(.*)",
-      "dest": "/api/$1"
+      "dest": "/api/$1.js"
     },
     {
       "src": "/favicon.(ico|png)",
