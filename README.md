@@ -121,7 +121,7 @@ Important hosting note:
 If you deploy this repository on Vercel:
 
 - Set the Vercel project Root Directory to the repository root (not `api`).
-- Keep the checked-in `vercel.json` file; it explicitly marks this as static frontend plus `/api` functions.
+- Keep the checked-in `vercel.json` file; it uses explicit `builds` and `routes` for static frontend + `/api` functions.
 - Keep `api/map-state.js`, `api/statuses.js`, `api/store.js`, and `api/tree-data.js` under `api/`.
 
 Expected artifact shape for this repo on Vercel:
