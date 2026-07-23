@@ -8,7 +8,6 @@ from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / 'data' / 'drive-audit-map.db'
-STORE_PATH = ROOT / 'status-store.json'
 
 
 class DriveAuditHandler(SimpleHTTPRequestHandler):
@@ -35,16 +34,49 @@ class DriveAuditHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _load_store(self) -> dict:
-        if not STORE_PATH.exists():
-            return {}
-        try:
-            return json.loads(STORE_PATH.read_text(encoding='utf-8'))
-        except Exception:
-            return {}
+    def _connect_db(self) -> sqlite3.Connection:
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        conn.execute('PRAGMA journal_mode = WAL')
+        conn.execute('PRAGMA synchronous = NORMAL')
+        conn.execute('PRAGMA busy_timeout = 5000')
+        conn.execute(
+            '''
+            CREATE TABLE IF NOT EXISTS node_statuses (
+              node_path TEXT PRIMARY KEY,
+              status TEXT NOT NULL
+            )
+            '''
+        )
+        return conn
 
-    def _save_store(self, payload: dict) -> None:
-        STORE_PATH.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+    def _read_statuses(self) -> dict:
+        conn = self._connect_db()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT node_path, status FROM node_statuses ORDER BY node_path')
+            rows = cursor.fetchall()
+            return {node_path: status for node_path, status in rows}
+        finally:
+            conn.close()
+
+    def _write_statuses(self, statuses: dict) -> dict:
+        conn = self._connect_db()
+        try:
+            cursor = conn.cursor()
+            cursor.execute('BEGIN IMMEDIATE')
+            cursor.execute('DELETE FROM node_statuses')
+            cursor.executemany(
+                'INSERT INTO node_statuses (node_path, status) VALUES (?, ?)',
+                [(node_path, status or 'none') for node_path, status in statuses.items()],
+            )
+            conn.commit()
+            return statuses
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def _read_tree_rows(self) -> list[dict]:
         if not DB_PATH.exists():
@@ -97,6 +129,8 @@ class DriveAuditHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
+        statuses = self._read_statuses()
+
         if parsed.path == '/api/tree-data':
             rows = self._read_tree_rows()
             self._send_json(
@@ -110,11 +144,12 @@ class DriveAuditHandler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == '/api/statuses':
-            self._send_json(200, self._load_store())
+            self._send_json(200, {'statuses': statuses})
             return
 
         if parsed.path == '/api/map-state':
-            self._send_json(200, self._load_store())
+            rows = self._read_tree_rows()
+            self._send_json(200, {'statuses': statuses, 'rows': rows})
             return
 
         super().do_GET()
@@ -124,14 +159,15 @@ class DriveAuditHandler(SimpleHTTPRequestHandler):
         if parsed.path in ('/api/statuses', '/api/map-state'):
             payload = self._read_json_body()
             statuses = payload.get('statuses') if isinstance(payload, dict) else {}
-            rows = payload.get('rows') if isinstance(payload, dict) else []
             if not isinstance(statuses, dict):
                 statuses = {}
-            if not isinstance(rows, list):
-                rows = []
-            next_payload = {'statuses': statuses, 'rows': rows}
-            self._save_store(next_payload)
-            self._send_json(200, next_payload)
+
+            next_statuses = self._write_statuses(statuses)
+            if parsed.path == '/api/map-state':
+                rows = self._read_tree_rows()
+                self._send_json(200, {'statuses': next_statuses, 'rows': rows})
+            else:
+                self._send_json(200, {'statuses': next_statuses})
             return
 
         self._send_json(405, {'error': 'Method not allowed'})

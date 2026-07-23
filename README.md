@@ -89,6 +89,26 @@ npm run dev
 
 The app now loads rows from SQLite automatically on startup.
 
+## Shared status writes (WAL)
+
+Status updates are persisted in SQLite table `node_statuses` and both local API endpoints read/write that table:
+
+- `PUT /api/statuses`
+- `PUT /api/map-state`
+
+The server enables:
+
+- `PRAGMA journal_mode = WAL`
+- `PRAGMA synchronous = NORMAL`
+- `PRAGMA busy_timeout = 5000`
+
+This allows multiple clients to read while others write, as long as they hit the same server process and database file.
+
+Important hosting note:
+
+- Vercel serverless functions do not provide a durable shared writable filesystem for team-wide SQLite writes.
+- For true shared team writes, host this API on a persistent server/VM/container (or switch to a managed database like Postgres/Supabase).
+
 ## Deployment summary
 
 1. Push this repo to GitHub.
