@@ -6,6 +6,13 @@ const zoomOutButton = document.getElementById('zoomOut');
 const resetViewButton = document.getElementById('resetView');
 const shareButton = document.getElementById('shareLink');
 
+function logDebug(message, detail) {
+  const entry = { message, detail, at: new Date().toISOString() };
+  window.__driveAuditDebug = window.__driveAuditDebug || [];
+  window.__driveAuditDebug.push(entry);
+  console.debug('[drive-audit]', message, detail || '');
+}
+
 const STORAGE_KEY = 'drive-audit-map-statuses';
 function resolveApiEndpoint(path) {
   if (typeof window !== 'undefined' && window.DRIVE_AUDIT_API_URL) {
@@ -585,21 +592,32 @@ function loadSharedStateFromUrl() {
 }
 
 async function bootstrapApp() {
-  statuses = await loadStatuses();
-  const serverState = await loadSharedStateFromServer();
-  if (serverState) {
-    applySharedState(serverState);
-    return;
-  }
+  logDebug('Bootstrap start', { path: window.location.pathname + window.location.search + window.location.hash });
+  try {
+    statuses = await loadStatuses();
+    logDebug('Statuses loaded', { statusCount: Object.keys(statuses).length });
+    const serverState = await loadSharedStateFromServer();
+    if (serverState) {
+      logDebug('Loaded shared state from server', { rowCount: serverState.rows?.length || 0 });
+      applySharedState(serverState);
+      return;
+    }
 
-  const sharedState = loadSharedStateFromUrl();
-  if (sharedState) {
-    applySharedState(sharedState);
-    return;
-  }
+    const sharedState = loadSharedStateFromUrl();
+    if (sharedState) {
+      logDebug('Loaded shared state from URL', { rowCount: sharedState.rows?.length || 0 });
+      applySharedState(sharedState);
+      return;
+    }
 
-  if (treeState.length > 0) {
-    renderMap(treeState);
+    if (treeState.length > 0) {
+      renderMap(treeState);
+    } else {
+      logDebug('Bootstrap complete with empty tree state');
+    }
+  } catch (error) {
+    logDebug('Bootstrap failed', { message: error?.message, stack: error?.stack });
+    console.error('Drive audit bootstrap failed', error);
   }
 }
 
@@ -635,13 +653,24 @@ csvFileInput.addEventListener('change', async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
 
-  const text = await file.text();
-  const rows = parseCSV(text);
-  currentRows = rows;
-  await syncStatusesFromServer();
-  initializeFromRows(rows);
-  await saveSharedStateToServer();
-  lastSharedPayload = { statuses, rows };
+  logDebug('CSV import start', { name: file.name, size: file.size });
+
+  try {
+    const text = await file.text();
+    logDebug('CSV text loaded', { length: text.length });
+    const rows = parseCSV(text);
+    logDebug('CSV rows parsed', { rowCount: rows.length });
+    currentRows = rows;
+    await syncStatusesFromServer();
+    initializeFromRows(rows);
+    await saveSharedStateToServer();
+    lastSharedPayload = { statuses, rows };
+    logDebug('CSV import complete', { rowCount: rows.length });
+  } catch (error) {
+    logDebug('CSV import failed', { message: error?.message, stack: error?.stack });
+    console.error('Drive audit CSV import failed', error);
+    treeRoot.innerHTML = '<div class="empty-state">The CSV could not be imported. Check the console for details.</div>';
+  }
 });
 
 expandAllButton.addEventListener('click', () => {

@@ -308,6 +308,18 @@
       </main>
     </div>
 
+    <script>
+      window.__driveAuditDebug = window.__driveAuditDebug || [];
+      window.__driveAuditDebug.push({ type: 'page-load', at: new Date().toISOString(), path: window.location.pathname + window.location.search + window.location.hash });
+      window.addEventListener('error', (event) => {
+        window.__driveAuditDebug.push({ type: 'window-error', message: event.message, filename: event.filename, lineno: event.lineno, colno: event.colno, stack: event.error?.stack });
+        console.error('Drive audit window error', event.message, event.filename, event.lineno, event.colno, event.error);
+      });
+      window.addEventListener('unhandledrejection', (event) => {
+        window.__driveAuditDebug.push({ type: 'unhandled-rejection', reason: String(event.reason) });
+        console.error('Drive audit unhandled rejection', event.reason);
+      });
+    </script>
     <script src="share-state.js"></script>
     <script src="shared-storage.js"></script>
     <script src="client-app.js"></script>
