@@ -1,4 +1,5 @@
 const treeRoot = document.getElementById('treeRoot');
+const collapseAllButton = document.getElementById('collapseAll');
 const expandAllButton = document.getElementById('expandAll');
 const zoomInButton = document.getElementById('zoomIn');
 const zoomOutButton = document.getElementById('zoomOut');
@@ -35,6 +36,8 @@ const CARD_HEIGHT = 72;
 const ROW_HEIGHT = 100;
 const HORIZONTAL_STEP = 280;
 const REALTIME_SYNC_INTERVAL_MS = 3000;
+const DEFAULT_VIEW_OFFSET_X = 12;
+const DEFAULT_VIEW_OFFSET_Y = 24;
 
 let treeState = [];
 let expandedPaths = new Set();
@@ -45,8 +48,8 @@ let realtimeSyncTimer = null;
 let realtimeSyncInFlight = false;
 let viewState = {
   scale: 1,
-  offsetX: 40,
-  offsetY: 40,
+  offsetX: DEFAULT_VIEW_OFFSET_X,
+  offsetY: DEFAULT_VIEW_OFFSET_Y,
   isDragging: false,
   dragStartX: 0,
   dragStartY: 0,
@@ -303,7 +306,7 @@ function layoutMap(nodes) {
     const rowCount = getRowCount(node);
     const centerY = top + (rowCount * ROW_HEIGHT) / 2;
     const layoutNode = {
-      x: depth * HORIZONTAL_STEP + 30,
+      x: depth * HORIZONTAL_STEP + 8,
       y: centerY - CARD_HEIGHT / 2,
       node,
     };
@@ -335,19 +338,20 @@ function layoutMap(nodes) {
 
 function buildMapSvg(nodes) {
   const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 2200 1800');
   svg.setAttribute('preserveAspectRatio', 'xMinYMin meet');
 
   const group = document.createElementNS(SVG_NS, 'g');
   group.setAttribute('id', 'mapContent');
 
   const { layout, connectors } = layoutMap(nodes);
-  const maxX = Math.max(...layout.map((entry) => entry.x + CARD_WIDTH), 900);
-  const maxY = Math.max(...layout.map((entry) => entry.y + CARD_HEIGHT), 500);
-  const width = Math.max(1200, maxX + 140);
-  const height = Math.max(700, maxY + 120);
+  const maxX = Math.max(...layout.map((entry) => entry.x + CARD_WIDTH), CARD_WIDTH + 40);
+  const maxY = Math.max(...layout.map((entry) => entry.y + CARD_HEIGHT), CARD_HEIGHT + 40);
+  const width = maxX + 80;
+  const height = maxY + 80;
 
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('width', String(width));
+  svg.setAttribute('height', String(height));
 
   connectors.forEach(({ parent, child }) => {
     if (!parent || !child) return;
@@ -476,17 +480,14 @@ function renderMap(nodes) {
   };
 
   svgEl.addEventListener('pointerdown', (event) => {
-    if (event.button !== 2) return;
+    if (event.button !== 0) return;
     if (event.target.closest('button, .map-node-card')) return;
 
     viewState.isDragging = true;
     viewState.dragStartX = event.clientX - viewState.offsetX;
     viewState.dragStartY = event.clientY - viewState.offsetY;
+    viewport.classList.add('is-dragging');
     setPointerCapture(event);
-  });
-
-  svgEl.addEventListener('contextmenu', (event) => {
-    event.preventDefault();
   });
 
   svgEl.addEventListener('pointermove', (event) => {
@@ -498,10 +499,17 @@ function renderMap(nodes) {
 
   svgEl.addEventListener('pointerup', () => {
     viewState.isDragging = false;
+    viewport.classList.remove('is-dragging');
   });
 
   svgEl.addEventListener('pointerleave', () => {
     viewState.isDragging = false;
+    viewport.classList.remove('is-dragging');
+  });
+
+  svgEl.addEventListener('pointercancel', () => {
+    viewState.isDragging = false;
+    viewport.classList.remove('is-dragging');
   });
 
   svgEl.addEventListener('wheel', (event) => {
@@ -520,9 +528,10 @@ function initializeFromRows(rows) {
     return;
   }
 
-  treeState.forEach((node) => {
-    expandedPaths.add(node.path);
-  });
+  expandedPaths = new Set();
+  viewState.offsetX = DEFAULT_VIEW_OFFSET_X;
+  viewState.offsetY = DEFAULT_VIEW_OFFSET_Y;
+  viewState.scale = 1;
 
   renderMap(treeState);
 }
@@ -644,6 +653,11 @@ expandAllButton.addEventListener('click', () => {
   renderMap(treeState);
 });
 
+collapseAllButton?.addEventListener('click', () => {
+  expandedPaths.clear();
+  renderMap(treeState);
+});
+
 zoomInButton.addEventListener('click', () => {
   viewState.scale = Math.min(2.4, viewState.scale + 0.1);
   renderMap(treeState);
@@ -656,8 +670,8 @@ zoomOutButton.addEventListener('click', () => {
 
 resetViewButton.addEventListener('click', () => {
   viewState.scale = 1;
-  viewState.offsetX = 40;
-  viewState.offsetY = 40;
+  viewState.offsetX = DEFAULT_VIEW_OFFSET_X;
+  viewState.offsetY = DEFAULT_VIEW_OFFSET_Y;
   renderMap(treeState);
 });
 
