@@ -1,19 +1,5 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "index.html",
-      "use": "@vercel/static"
-    },
-    {
-      "src": "{styles.css,client-app.js,share-state.js,shared-storage.js,favicon.ico,tmp-mini-tree.csv}",
-      "use": "@vercel/static"
-    },
-    {
-      "src": "api/**/*.js",
-      "use": "@vercel/node"
-    }
-  ],
   "routes": [
     {
       "src": "/api/(.*)",
@@ -22,6 +8,10 @@
     {
       "src": "/favicon.(ico|png)",
       "dest": "/favicon.ico"
+    },
+    {
+      "src": "/(.*\\.(css|js|csv|json|ico|png|svg))",
+      "dest": "/$1"
     },
     {
       "src": "/(.*)",
