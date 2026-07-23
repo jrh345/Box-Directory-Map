@@ -631,7 +631,14 @@ async function shareCurrentState() {
     statuses,
   };
 
-  const shareUrl = window.DriveAuditMapShareState?.buildShareUrl(window.location, payload);
+  const configuredShareBaseUrl = typeof window.DRIVE_AUDIT_PUBLIC_SHARE_URL === 'string'
+    ? window.DRIVE_AUDIT_PUBLIC_SHARE_URL.trim()
+    : '';
+  const shareUrl = window.DriveAuditMapShareState?.buildShareUrl(
+    window.location,
+    payload,
+    configuredShareBaseUrl
+  );
   if (!shareUrl) {
     setShareButtonText('Share unavailable', 1800);
     return;
@@ -641,7 +648,10 @@ async function shareCurrentState() {
     await copyTextToClipboard(shareUrl);
 
     try {
-      window.history.replaceState({}, '', shareUrl);
+      const shareUrlObject = new URL(shareUrl);
+      if (shareUrlObject.origin === window.location.origin) {
+        window.history.replaceState({}, '', shareUrl);
+      }
     } catch {
       // URL updates can fail on very long hashes; copy still succeeded.
     }

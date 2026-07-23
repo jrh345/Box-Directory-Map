@@ -51,8 +51,9 @@
     }
   }
 
-  function buildShareUrl(location, payload) {
-    const url = new URL(location.href);
+  function buildShareUrl(location, payload, baseUrl) {
+    const sourceUrl = baseUrl || location.href;
+    const url = new URL(sourceUrl, location.href);
     url.hash = `share=${encodeSharedState(payload)}`;
     return url.toString();
   }
