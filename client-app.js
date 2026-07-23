@@ -197,55 +197,6 @@ async function saveSharedStateToServer() {
   }
 }
 
-function parseCSVLine(line) {
-  const values = [];
-  let current = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i += 1) {
-    const char = line[i];
-    const next = line[i + 1];
-
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === ',' && !inQuotes) {
-      values.push(current);
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-
-  values.push(current);
-  return values;
-}
-
-function parseCSV(text) {
-  const lines = text.replace(/\r/g, '').split('\n').filter(Boolean);
-  if (lines.length < 2) return [];
-
-  const headers = parseCSVLine(lines[0]).map((entry) => entry.trim());
-  const rows = [];
-
-  for (const line of lines.slice(1)) {
-    const values = parseCSVLine(line);
-    const record = {};
-
-    headers.forEach((header, index) => {
-      record[header] = values[index] || '';
-    });
-
-    rows.push(record);
-  }
-
-  return rows;
-}
-
 function normalizePath(path) {
   return path.replace(/\\/g, '/').replace(/^C:\//i, '/');
 }

@@ -57,6 +57,22 @@ To seed the database from the included CSV sample:
 python scripts/import_csv_to_sqlite.py
 ```
 
+You can also provide custom paths:
+
+```bash
+python scripts/import_csv_to_sqlite.py --csv "C:\path\to\inventory.csv" --db "data\drive-audit-map.db"
+```
+
+CSV to SQLite mapping used by the importer:
+
+- `Full Path` -> `drive_items.full_path`
+- `Type` -> `drive_items.type`
+- `Name` -> `drive_items.name`
+- `Extension` -> `drive_items.extension`
+- `Parent Folder` -> `drive_items.parent_folder`
+- `Top-Level Folder` -> `drive_items.top_level_folder`
+- `Depth` -> `drive_items.depth`
+
 Then run:
 
 ```bash
@@ -78,12 +94,12 @@ If you deploy this repository on Vercel:
 
 - Set the Vercel project Root Directory to the repository root (not `api`).
 - Keep the checked-in `vercel.json` file; it explicitly marks this as static frontend plus `/api` functions.
-- Keep only `api/map-state.js`, `api/statuses.js`, and `api/store.js` under `api/`.
+- Keep `api/map-state.js`, `api/statuses.js`, `api/store.js`, and `api/tree-data.js` under `api/`.
 
 Expected artifact shape for this repo on Vercel:
 
 - Static output for `/` (HTML page)
-- Serverless functions for `/api/map-state` and `/api/statuses`
+- Serverless functions for `/api/map-state`, `/api/statuses`, and `/api/tree-data`
 
 ## Vercel clean redeploy checklist
 
