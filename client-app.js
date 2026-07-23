@@ -34,12 +34,15 @@ const CARD_WIDTH = 220;
 const CARD_HEIGHT = 72;
 const ROW_HEIGHT = 100;
 const HORIZONTAL_STEP = 280;
+const REALTIME_SYNC_INTERVAL_MS = 3000;
 
 let treeState = [];
 let expandedPaths = new Set();
 let statuses = {};
 let currentRows = [];
 let lastSharedPayload = null;
+let realtimeSyncTimer = null;
+let realtimeSyncInFlight = false;
 let viewState = {
   scale: 1,
   offsetX: 40,
@@ -133,6 +136,78 @@ async function saveStatuses() {
   } catch {
     // Ignore remote save failures and keep the local browser state as the fallback.
   }
+}
+
+function applyStatusesToTree(nodes) {
+  nodes.forEach((node) => {
+    node.status = statuses[node.path] || 'none';
+    if (node.children.length > 0) {
+      applyStatusesToTree(node.children);
+    }
+  });
+}
+
+function refreshStatusesInView() {
+  if (!treeState.length) return;
+  applyStatusesToTree(treeState);
+  renderMap(treeState);
+}
+
+async function syncStatusesInBackground() {
+  if (realtimeSyncInFlight || !treeState.length) {
+    return;
+  }
+
+  realtimeSyncInFlight = true;
+
+  try {
+    const previousStatuses = JSON.stringify(statuses);
+    await syncStatusesFromServer();
+    const nextStatuses = JSON.stringify(statuses);
+
+    if (nextStatuses !== previousStatuses) {
+      refreshStatusesInView();
+      logDebug('Realtime status sync applied', { statusCount: Object.keys(statuses).length });
+    }
+  } catch (error) {
+    logDebug('Realtime status sync failed', { message: error?.message, stack: error?.stack });
+  } finally {
+    realtimeSyncInFlight = false;
+  }
+}
+
+function startRealtimeSync() {
+  if (realtimeSyncTimer) {
+    window.clearInterval(realtimeSyncTimer);
+  }
+
+  realtimeSyncTimer = window.setInterval(() => {
+    syncStatusesInBackground();
+  }, REALTIME_SYNC_INTERVAL_MS);
+
+  window.addEventListener('focus', () => {
+    syncStatusesInBackground();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      syncStatusesInBackground();
+    }
+  });
+
+  window.addEventListener('storage', (event) => {
+    if (event.key !== STORAGE_KEY || !event.newValue) {
+      return;
+    }
+
+    try {
+      statuses = JSON.parse(event.newValue);
+      refreshStatusesInView();
+      logDebug('Statuses refreshed from local storage event', { statusCount: Object.keys(statuses).length });
+    } catch {
+      // Ignore invalid local storage payloads.
+    }
+  });
 }
 
 function normalizePath(path) {
@@ -458,6 +533,7 @@ async function bootstrapApp() {
     statuses = await loadStatuses();
     logDebug('Statuses loaded', { statusCount: Object.keys(statuses).length });
     await loadRowsFromDatabase();
+    startRealtimeSync();
   } catch (error) {
     logDebug('Bootstrap failed', { message: error?.message, stack: error?.stack });
     console.error('Drive audit bootstrap failed', error);
