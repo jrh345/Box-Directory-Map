@@ -55,7 +55,7 @@ node local-server.js
 If you deploy this repository on Vercel:
 
 - Set the Vercel project Root Directory to the repository root (not `api`).
-- Do not add a custom `vercel.json` catch-all route unless you need framework-specific behavior.
+- Keep the checked-in `vercel.json` file; it explicitly marks this as static frontend plus `/api` functions.
 - Keep only `api/map-state.js`, `api/statuses.js`, and `api/store.js` under `api/`.
 
 Expected artifact shape for this repo on Vercel:
