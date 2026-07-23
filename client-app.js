@@ -336,7 +336,7 @@ function layoutMap(nodes) {
   return { layout, connectors };
 }
 
-function buildMapSvg(nodes) {
+function buildMapSvg(nodes, minWidth = 0, minHeight = 0) {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('preserveAspectRatio', 'xMinYMin meet');
 
@@ -346,8 +346,8 @@ function buildMapSvg(nodes) {
   const { layout, connectors } = layoutMap(nodes);
   const maxX = Math.max(...layout.map((entry) => entry.x + CARD_WIDTH), CARD_WIDTH + 40);
   const maxY = Math.max(...layout.map((entry) => entry.y + CARD_HEIGHT), CARD_HEIGHT + 40);
-  const width = maxX + 80;
-  const height = maxY + 80;
+  const width = Math.max(maxX + 80, minWidth);
+  const height = Math.max(maxY + 80, minHeight);
 
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   svg.setAttribute('width', String(width));
@@ -459,15 +459,17 @@ function renderMap(nodes) {
   const viewport = document.createElement('div');
   viewport.className = 'map-viewport';
   viewport.id = 'mapViewport';
-
-  const svg = buildMapSvg(nodes);
-  viewport.appendChild(svg);
   treeRoot.appendChild(viewport);
+
+  const viewportWidth = Math.max(viewport.clientWidth, treeRoot.clientWidth, 900);
+  const viewportHeight = Math.max(viewport.clientHeight, treeRoot.clientHeight, 520);
+  const svg = buildMapSvg(nodes, viewportWidth, viewportHeight);
+  viewport.appendChild(svg);
 
   const mapContent = svg.querySelector('#mapContent');
   mapContent.setAttribute('transform', `translate(${viewState.offsetX}, ${viewState.offsetY}) scale(${viewState.scale})`);
 
-  const svgEl = svg;
+  const dragSurface = viewport;
   let pointerId = null;
 
   const updateTransform = () => {
@@ -476,11 +478,11 @@ function renderMap(nodes) {
 
   const setPointerCapture = (event) => {
     pointerId = event.pointerId;
-    svgEl.setPointerCapture(pointerId);
+    dragSurface.setPointerCapture(pointerId);
   };
 
-  svgEl.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
+  dragSurface.addEventListener('pointerdown', (event) => {
+    if (event.button !== 2) return;
     if (event.target.closest('button, .map-node-card')) return;
 
     viewState.isDragging = true;
@@ -490,29 +492,33 @@ function renderMap(nodes) {
     setPointerCapture(event);
   });
 
-  svgEl.addEventListener('pointermove', (event) => {
+  dragSurface.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+  });
+
+  dragSurface.addEventListener('pointermove', (event) => {
     if (!viewState.isDragging) return;
     viewState.offsetX = event.clientX - viewState.dragStartX;
     viewState.offsetY = event.clientY - viewState.dragStartY;
     updateTransform();
   });
 
-  svgEl.addEventListener('pointerup', () => {
+  dragSurface.addEventListener('pointerup', () => {
     viewState.isDragging = false;
     viewport.classList.remove('is-dragging');
   });
 
-  svgEl.addEventListener('pointerleave', () => {
+  dragSurface.addEventListener('pointerleave', () => {
     viewState.isDragging = false;
     viewport.classList.remove('is-dragging');
   });
 
-  svgEl.addEventListener('pointercancel', () => {
+  dragSurface.addEventListener('pointercancel', () => {
     viewState.isDragging = false;
     viewport.classList.remove('is-dragging');
   });
 
-  svgEl.addEventListener('wheel', (event) => {
+  dragSurface.addEventListener('wheel', (event) => {
     event.preventDefault();
     const delta = event.deltaY > 0 ? -0.1 : 0.1;
     const nextScale = Math.min(2.4, Math.max(0.7, viewState.scale + delta));
