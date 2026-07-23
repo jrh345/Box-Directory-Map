@@ -13,6 +13,12 @@ test('vercel config serves index.html for the app root', () => {
   assert.equal(rootRoute.dest, '/index.html');
 });
 
+test('vercel config serves static assets before the SPA fallback', () => {
+  const assetRoute = vercelConfig.routes.find((entry) => entry.src === '/(.*\\.(css|js|csv|json|ico|png|svg))');
+  assert.ok(assetRoute, 'expected an asset route');
+  assert.equal(assetRoute.dest, '/$1');
+});
+
 test('vercel config routes API paths to the API handlers', () => {
   const apiRoute = vercelConfig.routes.find((entry) => entry.src === '/api/(.*)');
   assert.ok(apiRoute, 'expected an API route');

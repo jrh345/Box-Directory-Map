@@ -49,3 +49,42 @@ node server.js
 2. Enable GitHub Pages for the repository.
 3. Host the shared status API on a separate public service.
 4. Set `window.DRIVE_AUDIT_API_URL` to the shared API URL.
+
+## Vercel notes
+
+If you deploy this repository on Vercel:
+
+- Set the Vercel project Root Directory to the repository root (not `api`).
+- Do not add a custom `vercel.json` catch-all route unless you need framework-specific behavior.
+- Keep only `api/map-state.js`, `api/statuses.js`, and `api/store.js` under `api/`.
+
+Expected artifact shape for this repo on Vercel:
+
+- Static output for `/` (HTML page)
+- Serverless functions for `/api/map-state` and `/api/statuses`
+
+## Vercel clean redeploy checklist
+
+Use this when Vercel serves an empty root page or reports a single API artifact at `/`.
+
+1. In Vercel Project Settings -> General:
+  - Root Directory: repository root (leave blank if the repo root is selected)
+  - Framework Preset: Other
+  - Build Command: empty
+  - Output Directory: empty
+  - Install Command: default
+2. In Vercel Project Settings -> Git:
+  - Confirm Production Branch is `master` for this repository.
+3. In Vercel Deployments:
+  - Trigger Redeploy from the latest commit on `master`.
+  - Use "Redeploy without cache" once.
+4. In Vercel Functions / Build Output:
+  - Confirm there is no single root API function at `/`.
+  - Confirm only API functions for `/api/map-state` and `/api/statuses`.
+5. In browser Network tab on the deployed URL:
+  - `GET /` returns non-empty HTML (response preview contains `<html` and app markup).
+  - `GET /client-app.js` returns JavaScript, not HTML fallback.
+  - `GET /shared-storage.js` returns JavaScript.
+  - `GET /api/map-state` returns JSON.
+
+If step 4 fails and you still see one API artifact at `/`, the project root is still mis-targeted in Vercel settings.

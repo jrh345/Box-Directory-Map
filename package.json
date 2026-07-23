@@ -4,6 +4,7 @@
   "private": true,
   "description": "Shared cloud-drive audit map",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "python -m http.server 8000"
   }
 }
