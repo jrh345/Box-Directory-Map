@@ -757,7 +757,17 @@ function renderMap(nodes, options = {}) {
     event.preventDefault();
     const delta = event.deltaY > 0 ? -0.1 : 0.1;
     const nextScale = Math.min(2.4, Math.max(0.7, viewState.scale + delta));
+    const viewportRect = viewport.getBoundingClientRect();
+    const anchorX = event.clientX - viewportRect.left;
+    const anchorY = event.clientY - viewportRect.top;
+
+    // Keep the content under the mouse pointer fixed while zooming.
+    const worldX = (anchorX - viewState.offsetX) / viewState.scale;
+    const worldY = (anchorY - viewState.offsetY) / viewState.scale;
+
     viewState.scale = nextScale;
+    viewState.offsetX = anchorX - worldX * viewState.scale;
+    viewState.offsetY = anchorY - worldY * viewState.scale;
     updateTransform();
   }, { passive: false });
 
