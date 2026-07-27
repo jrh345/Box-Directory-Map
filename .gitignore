@@ -1,0 +1,6 @@
+# Local SQLite database (do not commit)
+data/drive-audit-map.db
+
+# SQLite sidecar files
+*.db-wal
+*.db-shm

@@ -43,6 +43,9 @@ const HORIZONTAL_STEP = 280;
 const REALTIME_SYNC_INTERVAL_MS = 3000;
 const DEFAULT_VIEW_OFFSET_X = 12;
 const DEFAULT_VIEW_OFFSET_Y = 24;
+const EXPAND_ALL_LEVEL_LIMIT = 3;
+const SLOW_RENDER_THRESHOLD_MS = 120;
+const SLOW_RENDER_NODE_THRESHOLD = 450;
 
 let treeState = [];
 let expandedPaths = new Set();
@@ -54,6 +57,8 @@ let realtimeSyncInFlight = false;
 let previewFilter = 'all';
 let activeViewMode = 'map';
 let currentRenderedNodes = [];
+let isAutoPruningRender = false;
+let manuallyExpandedPaths = new Set();
 let viewState = {
   scale: 1,
   offsetX: DEFAULT_VIEW_OFFSET_X,
@@ -589,8 +594,10 @@ function buildMapSvg(nodes, minWidth = 0, minHeight = 0, options = {}) {
       if (node.type !== 'folder') return;
       if (expandedPaths.has(node.path)) {
         expandedPaths.delete(node.path);
+        manuallyExpandedPaths.delete(node.path);
       } else {
         expandedPaths.add(node.path);
+        manuallyExpandedPaths.add(node.path);
       }
       renderCurrentView();
     });
@@ -611,6 +618,22 @@ function buildMapSvg(nodes, minWidth = 0, minHeight = 0, options = {}) {
     titleRow.appendChild(label);
     titleRow.appendChild(type);
     card.appendChild(titleRow);
+
+    const hasDescendantSummary = node.type === 'folder' && (node.descendantStatus?.descendantTotal || 0) > 0;
+    const reviewedBadge = hasDescendantSummary
+      ? (() => {
+        const badge = document.createElement('div');
+        const fullyReviewed = node.descendantStatus.descendantUnassigned === 0;
+        badge.className = `map-node-review ${fullyReviewed ? 'is-reviewed' : 'is-pending'}`;
+        badge.textContent = fullyReviewed
+          ? '100% reviewed'
+          : `${node.descendantStatus.descendantUnassigned} unassigned`;
+        badge.title = fullyReviewed
+          ? 'All descendant nodes have statuses assigned'
+          : `${node.descendantStatus.descendantUnassigned} descendant nodes still need a status`;
+        return badge;
+      })()
+      : null;
 
     if (!readOnly) {
       const controls = document.createElement('div');
@@ -637,38 +660,35 @@ function buildMapSvg(nodes, minWidth = 0, minHeight = 0, options = {}) {
         controls.appendChild(button);
       });
 
-      if (node.type === 'folder' && (node.descendantStatus?.descendantTotal || 0) > 0) {
-        const reviewedBadge = document.createElement('div');
-        const fullyReviewed = node.descendantStatus.descendantUnassigned === 0;
-        reviewedBadge.className = `map-node-review ${fullyReviewed ? 'is-reviewed' : 'is-pending'}`;
-        reviewedBadge.textContent = fullyReviewed
-          ? '100% reviewed'
-          : `${node.descendantStatus.descendantUnassigned} unassigned`;
-        reviewedBadge.title = fullyReviewed
-          ? 'All descendant nodes have statuses assigned'
-          : `${node.descendantStatus.descendantUnassigned} descendant nodes still need a status`;
+      if (reviewedBadge) {
         controls.appendChild(reviewedBadge);
       }
 
       card.appendChild(controls);
+    } else if (reviewedBadge) {
+      const readOnlySummary = document.createElement('div');
+      readOnlySummary.className = 'map-node-controls read-only';
+      readOnlySummary.appendChild(reviewedBadge);
+      card.appendChild(readOnlySummary);
     }
     foreignObject.appendChild(card);
     group.appendChild(foreignObject);
   });
 
   svg.appendChild(group);
-  return svg;
+  return { svg, renderedNodeCount: layout.length };
 }
 
 function renderMap(nodes, options = {}) {
   const { readOnly = false } = options;
+  const renderStartedAt = performance.now();
   currentRenderedNodes = nodes;
   nodes.forEach((node) => summarizeDescendantStatus(node));
   treeRoot.innerHTML = '';
 
   if (!nodes.length) {
     treeRoot.innerHTML = '<div class="empty-state">No nodes match the current filter.</div>';
-    return;
+    return { renderDurationMs: performance.now() - renderStartedAt, renderedNodeCount: 0 };
   }
 
   const viewport = document.createElement('div');
@@ -678,7 +698,7 @@ function renderMap(nodes, options = {}) {
 
   const viewportWidth = Math.max(viewport.clientWidth, treeRoot.clientWidth, 900);
   const viewportHeight = Math.max(viewport.clientHeight, treeRoot.clientHeight, 520);
-  const svg = buildMapSvg(nodes, viewportWidth, viewportHeight, { readOnly });
+  const { svg, renderedNodeCount } = buildMapSvg(nodes, viewportWidth, viewportHeight, { readOnly });
   viewport.appendChild(svg);
 
   const mapContent = svg.querySelector('#mapContent');
@@ -740,6 +760,121 @@ function renderMap(nodes, options = {}) {
     viewState.scale = nextScale;
     updateTransform();
   }, { passive: false });
+
+  return {
+    renderDurationMs: performance.now() - renderStartedAt,
+    renderedNodeCount,
+  };
+}
+
+function countVisibleNodes(nodes) {
+  let count = 0;
+
+  const walk = (nodeList) => {
+    nodeList.forEach((node) => {
+      count += 1;
+      if (node.type === 'folder' && node.children.length > 0 && expandedPaths.has(node.path)) {
+        walk(node.children);
+      }
+    });
+  };
+
+  walk(nodes);
+  return count;
+}
+
+function subtreeHasAssignedStatus(node) {
+  if (getNodeStatus(node) !== 'none') {
+    return true;
+  }
+
+  for (const child of node.children) {
+    if (subtreeHasAssignedStatus(child)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function removePathAndDescendantsFromSet(pathSet, basePath) {
+  const basePrefix = `${basePath}/`;
+  Array.from(pathSet).forEach((path) => {
+    if (path === basePath || path.startsWith(basePrefix)) {
+      pathSet.delete(path);
+    }
+  });
+}
+
+function collapseExpandedBeyondLevel(nodes, maxLevel, options = {}, currentLevel = 1) {
+  const { preserveAssigned = true, protectedPaths = new Set() } = options;
+  let removedCount = 0;
+
+  nodes.forEach((node) => {
+    if (node.type !== 'folder') {
+      return;
+    }
+
+    const isExpanded = expandedPaths.has(node.path);
+    const shouldCollapseForLevel = currentLevel >= maxLevel;
+    const hasAssignedStatus = subtreeHasAssignedStatus(node);
+    const isProtected = protectedPaths.has(node.path);
+
+    if (
+      isExpanded &&
+      shouldCollapseForLevel &&
+      !isProtected &&
+      (!preserveAssigned || !hasAssignedStatus)
+    ) {
+      expandedPaths.delete(node.path);
+      removePathAndDescendantsFromSet(manuallyExpandedPaths, node.path);
+      removedCount += 1;
+    }
+
+    if (node.children.length > 0) {
+      removedCount += collapseExpandedBeyondLevel(node.children, maxLevel, options, currentLevel + 1);
+    }
+  });
+
+  return removedCount;
+}
+
+function maybePruneUnusedNodesForPerformance(renderMetrics) {
+  if (!renderMetrics || activeViewMode !== 'map' || isAutoPruningRender) {
+    return false;
+  }
+
+  const visibleNodeCount = countVisibleNodes(treeState);
+  const isSlowRender = renderMetrics.renderDurationMs >= SLOW_RENDER_THRESHOLD_MS;
+  const isLargeRender = visibleNodeCount >= SLOW_RENDER_NODE_THRESHOLD;
+
+  if (!isSlowRender || !isLargeRender) {
+    return false;
+  }
+
+  let removed = collapseExpandedBeyondLevel(treeState, EXPAND_ALL_LEVEL_LIMIT, {
+    preserveAssigned: true,
+    protectedPaths: manuallyExpandedPaths,
+  });
+
+  if (removed === 0) {
+    removed = collapseExpandedBeyondLevel(treeState, EXPAND_ALL_LEVEL_LIMIT, {
+      preserveAssigned: false,
+      protectedPaths: manuallyExpandedPaths,
+    });
+  }
+
+  if (removed === 0) {
+    return false;
+  }
+
+  logDebug('Auto-pruned deep expanded nodes for performance', {
+    removed,
+    renderDurationMs: Math.round(renderMetrics.renderDurationMs),
+    visibleNodeCount,
+  });
+
+  return true;
 }
 
 function renderCurrentView() {
@@ -758,7 +893,16 @@ function renderCurrentView() {
   }
 
   updatePreviewSummary();
-  renderMap(treeState, { readOnly: false });
+  const renderMetrics = renderMap(treeState, { readOnly: false });
+
+  if (maybePruneUnusedNodesForPerformance(renderMetrics)) {
+    isAutoPruningRender = true;
+    try {
+      renderMap(treeState, { readOnly: false });
+    } finally {
+      isAutoPruningRender = false;
+    }
+  }
 }
 
 function initializeFromRows(rows) {
@@ -769,11 +913,26 @@ function initializeFromRows(rows) {
   }
 
   expandedPaths = new Set();
+  manuallyExpandedPaths = new Set();
   viewState.offsetX = DEFAULT_VIEW_OFFSET_X;
   viewState.offsetY = DEFAULT_VIEW_OFFSET_Y;
   viewState.scale = 1;
 
   renderCurrentView();
+}
+
+function expandAllFolders(nodes, expandedSet, maxLevel = EXPAND_ALL_LEVEL_LIMIT, currentLevel = 1) {
+  nodes.forEach((node) => {
+    if (node.type === 'folder') {
+      if (currentLevel < maxLevel) {
+        expandedSet.add(node.path);
+      }
+
+      if (node.children.length > 0) {
+        expandAllFolders(node.children, expandedSet, maxLevel, currentLevel + 1);
+      }
+    }
+  });
 }
 
 async function bootstrapApp() {
@@ -897,14 +1056,15 @@ async function shareCurrentState() {
 }
 
 expandAllButton.addEventListener('click', () => {
-  treeState.forEach((node) => {
-    expandedPaths.add(node.path);
-  });
+  expandedPaths.clear();
+  manuallyExpandedPaths.clear();
+  expandAllFolders(treeState, expandedPaths, EXPAND_ALL_LEVEL_LIMIT);
   renderCurrentView();
 });
 
 collapseAllButton?.addEventListener('click', () => {
   expandedPaths.clear();
+  manuallyExpandedPaths.clear();
   renderCurrentView();
 });
 

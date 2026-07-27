@@ -224,6 +224,10 @@ p {
   margin-top: 8px;
 }
 
+.map-node-controls.read-only {
+  justify-content: flex-end;
+}
+
 .map-node-controls button {
   width: 20px;
   height: 20px;
@@ -247,6 +251,30 @@ p {
 
 .map-node-controls button.active {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.75);
+}
+
+.map-node-review {
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.4;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.map-node-review.is-reviewed {
+  color: #bbf7d0;
+  background: rgba(22, 163, 74, 0.18);
+  border-color: rgba(34, 197, 94, 0.45);
+}
+
+.map-node-review.is-pending {
+  color: #fde68a;
+  background: rgba(234, 179, 8, 0.2);
+  border-color: rgba(234, 179, 8, 0.45);
 }
 
 .map-toggle {
