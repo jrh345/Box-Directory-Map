@@ -940,11 +940,45 @@ async function bootstrapApp() {
   try {
     statuses = await loadStatuses();
     logDebug('Statuses loaded', { statusCount: Object.keys(statuses).length });
-    await loadRowsFromDatabase();
+    const loadedFromSharedState = await loadRowsFromSharedState();
+    if (!loadedFromSharedState) {
+      await loadRowsFromDatabase();
+    }
     startRealtimeSync();
   } catch (error) {
     logDebug('Bootstrap failed', { message: error?.message, stack: error?.stack });
     console.error('Drive audit bootstrap failed', error);
+  }
+}
+
+async function loadRowsFromSharedState() {
+  try {
+    const sharedState = await window.DriveAuditMapSharedStorage?.getState();
+    const rows = Array.isArray(sharedState?.rows) ? sharedState.rows : [];
+
+    if (rows.length === 0) {
+      logDebug('Shared state rows unavailable, falling back to SQLite', {
+        hasSharedState: Boolean(sharedState),
+      });
+      return false;
+    }
+
+    if (sharedState?.statuses && typeof sharedState.statuses === 'object') {
+      statuses = sharedState.statuses;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+    }
+
+    currentRows = rows;
+    initializeFromRows(rows);
+    lastSharedPayload = { statuses, rows };
+    logDebug('Rows loaded from shared state', { rowCount: rows.length });
+    return true;
+  } catch (error) {
+    logDebug('Shared state row load failed, falling back to SQLite', {
+      message: error?.message,
+      stack: error?.stack,
+    });
+    return false;
   }
 }
 
