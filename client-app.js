@@ -1,6 +1,11 @@
 const treeRoot = document.getElementById('treeRoot');
+const previewSummary = document.getElementById('previewSummary');
+const previewFilterButtons = Array.from(document.querySelectorAll('[data-preview-filter]'));
+const sidebarTabButtons = Array.from(document.querySelectorAll('[data-sidebar-tab]'));
+const sidebarTabPanels = Array.from(document.querySelectorAll('[data-sidebar-panel]'));
 const collapseAllButton = document.getElementById('collapseAll');
 const expandAllButton = document.getElementById('expandAll');
+const fitViewButton = document.getElementById('fitView');
 const zoomInButton = document.getElementById('zoomIn');
 const zoomOutButton = document.getElementById('zoomOut');
 const resetViewButton = document.getElementById('resetView');
@@ -46,6 +51,9 @@ let currentRows = [];
 let lastSharedPayload = null;
 let realtimeSyncTimer = null;
 let realtimeSyncInFlight = false;
+let previewFilter = 'all';
+let activeViewMode = 'map';
+let currentRenderedNodes = [];
 let viewState = {
   scale: 1,
   offsetX: DEFAULT_VIEW_OFFSET_X,
@@ -153,7 +161,7 @@ function applyStatusesToTree(nodes) {
 function refreshStatusesInView() {
   if (!treeState.length) return;
   applyStatusesToTree(treeState);
-  renderMap(treeState);
+  renderCurrentView();
 }
 
 async function syncStatusesInBackground() {
@@ -271,11 +279,15 @@ function buildTree(rows) {
 function summarizeDescendantStatus(node) {
   let hasYellow = false;
   let hasRed = false;
+  let descendantTotal = 0;
+  let descendantUnassigned = 0;
 
   node.children.forEach((child) => {
     const childSummary = summarizeDescendantStatus(child);
     hasYellow = hasYellow || childSummary.hasYellow;
     hasRed = hasRed || childSummary.hasRed;
+    descendantTotal += 1 + (childSummary.descendantTotal || 0);
+    descendantUnassigned += (child.status === 'none' ? 1 : 0) + (childSummary.descendantUnassigned || 0);
 
     if (child.status === 'yellow') {
       hasYellow = true;
@@ -285,8 +297,184 @@ function summarizeDescendantStatus(node) {
     }
   });
 
-  node.descendantStatus = { hasYellow, hasRed };
+  node.descendantStatus = { hasYellow, hasRed, descendantTotal, descendantUnassigned };
   return node.descendantStatus;
+}
+
+function getNodeStatus(node) {
+  return statuses[node.path] || 'none';
+}
+
+function doesNodeMatchPreviewFilter(node, filter) {
+  const nodeStatus = getNodeStatus(node);
+
+  switch (filter) {
+    case 'no-red':
+      return nodeStatus !== 'red';
+    case 'unassigned-only':
+      return nodeStatus === 'none';
+    case 'yellow-only':
+      return nodeStatus === 'yellow';
+    case 'green-only':
+      return nodeStatus === 'green';
+    case 'red-only':
+      return nodeStatus === 'red';
+    case 'all':
+    default:
+      return true;
+  }
+}
+
+function buildPreviewBranch(node, filter) {
+  if (filter === 'all') {
+    return {
+      node,
+      selfMatches: true,
+      children: node.children
+        .map((child) => buildPreviewBranch(child, filter))
+        .filter(Boolean),
+    };
+  }
+
+  const children = node.children
+    .map((child) => buildPreviewBranch(child, filter))
+    .filter(Boolean);
+  const selfMatches = doesNodeMatchPreviewFilter(node, filter);
+
+  if (!selfMatches && children.length === 0) {
+    return null;
+  }
+
+  return {
+    node,
+    selfMatches,
+    children,
+  };
+}
+
+function countPreviewMatches(branches) {
+  return branches.reduce((sum, branch) => {
+    const selfCount = branch.selfMatches ? 1 : 0;
+    return sum + selfCount + countPreviewMatches(branch.children);
+  }, 0);
+}
+
+function cloneFilteredNodes(branches, renderState) {
+  const filteredNodes = [];
+
+  branches.forEach((branch) => {
+    renderState.rendered += 1;
+    filteredNodes.push({
+      id: branch.node.id,
+      name: branch.node.name,
+      type: branch.node.type,
+      path: branch.node.path,
+      status: getNodeStatus(branch.node),
+      selfMatches: branch.selfMatches,
+      descendantStatus: branch.node.descendantStatus,
+      children: cloneFilteredNodes(branch.children, renderState),
+    });
+  });
+
+  return filteredNodes;
+}
+
+function buildFilteredViewData() {
+  const branches = treeState
+    .map((node) => buildPreviewBranch(node, previewFilter))
+    .filter(Boolean);
+
+  const matchCount = countPreviewMatches(branches);
+  const renderState = { rendered: 0, truncated: false };
+  const nodes = cloneFilteredNodes(branches, renderState);
+
+  return {
+    nodes,
+    matchCount,
+    rendered: renderState.rendered,
+    truncated: renderState.truncated,
+  };
+}
+
+function updatePreviewSummary(data = null) {
+  if (!previewSummary) return;
+
+  if (activeViewMode !== 'preview') {
+    previewSummary.textContent = 'Switch to preview mode';
+    return;
+  }
+
+  const details = data || buildFilteredViewData();
+  if (details.matchCount === 0 || details.nodes.length === 0) {
+    previewSummary.textContent = '0 matches';
+    return;
+  }
+
+  previewSummary.textContent = `${details.matchCount} matches`;
+}
+
+function setPreviewFilter(nextFilter) {
+  previewFilter = nextFilter;
+  previewFilterButtons.forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.previewFilter === nextFilter);
+  });
+
+  if (activeViewMode === 'preview') {
+    renderCurrentView();
+  } else {
+    updatePreviewSummary();
+  }
+}
+
+function setSidebarTab(nextTab) {
+  if (nextTab === activeViewMode) {
+    return;
+  }
+
+  activeViewMode = nextTab;
+
+  sidebarTabButtons.forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.sidebarTab === nextTab);
+  });
+
+  sidebarTabPanels.forEach((panel) => {
+    panel.classList.toggle('is-active', panel.dataset.sidebarPanel === nextTab);
+  });
+
+  renderCurrentView();
+}
+
+function fitViewToNodes(nodes, options = {}) {
+  const { readOnly = false } = options;
+  const viewport = document.getElementById('mapViewport');
+  if (!viewport || !nodes.length) return;
+
+  const { layout } = layoutMap(nodes);
+  if (!layout.length) return;
+
+  const viewportRect = viewport.getBoundingClientRect();
+  const padding = 40;
+  const minX = Math.min(...layout.map((entry) => entry.x));
+  const minY = Math.min(...layout.map((entry) => entry.y));
+  const maxX = Math.max(...layout.map((entry) => entry.x + CARD_WIDTH));
+  const maxY = Math.max(...layout.map((entry) => entry.y + CARD_HEIGHT));
+  const contentWidth = maxX - minX + padding * 2;
+  const contentHeight = maxY - minY + padding * 2;
+  const scaleX = viewportRect.width / contentWidth;
+  const scaleY = viewportRect.height / contentHeight;
+  const nextScale = Math.max(0.35, Math.min(1.4, Math.min(scaleX, scaleY)));
+
+  viewState.scale = nextScale;
+  viewState.offsetX = padding - minX * nextScale;
+  viewState.offsetY = padding - minY * nextScale;
+
+  const svg = viewport.querySelector('svg');
+  if (svg) {
+    const mapContent = svg.querySelector('#mapContent');
+    if (mapContent) {
+      mapContent.setAttribute('transform', `translate(${viewState.offsetX}, ${viewState.offsetY}) scale(${viewState.scale})`);
+    }
+  }
 }
 
 function getRowCount(node) {
@@ -336,7 +524,8 @@ function layoutMap(nodes) {
   return { layout, connectors };
 }
 
-function buildMapSvg(nodes, minWidth = 0, minHeight = 0) {
+function buildMapSvg(nodes, minWidth = 0, minHeight = 0, options = {}) {
+  const { readOnly = false } = options;
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('preserveAspectRatio', 'xMinYMin meet');
 
@@ -380,7 +569,11 @@ function buildMapSvg(nodes, minWidth = 0, minHeight = 0) {
     if (node.descendantStatus?.hasYellow) descendantClasses.push('has-descendant-yellow');
     if (node.descendantStatus?.hasRed) descendantClasses.push('has-descendant-red');
 
-    card.className = `map-node-card status-${node.status} ${descendantClasses.join(' ')}`.trim();
+    const modeClasses = [];
+    if (node.selfMatches === false) {
+      modeClasses.push('context-only');
+    }
+    card.className = `map-node-card status-${node.status} ${modeClasses.join(' ')} ${descendantClasses.join(' ')}`.trim();
 
     const titleRow = document.createElement('div');
     titleRow.className = 'map-node-title';
@@ -399,7 +592,7 @@ function buildMapSvg(nodes, minWidth = 0, minHeight = 0) {
       } else {
         expandedPaths.add(node.path);
       }
-      renderMap(treeState);
+      renderCurrentView();
     });
     toggleButton.addEventListener('mousedown', (event) => {
       event.stopPropagation();
@@ -419,31 +612,46 @@ function buildMapSvg(nodes, minWidth = 0, minHeight = 0) {
     titleRow.appendChild(type);
     card.appendChild(titleRow);
 
-    const controls = document.createElement('div');
-    controls.className = 'map-node-controls';
+    if (!readOnly) {
+      const controls = document.createElement('div');
+      controls.className = 'map-node-controls';
 
-    ['green', 'yellow', 'red'].forEach((statusValue) => {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = `status-button ${statusValue}`;
-      button.title = `Set ${statusValue}`;
-      if (node.status === statusValue) button.classList.add('active');
-      button.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        const nextStatus = node.status === statusValue ? 'none' : statusValue;
-        statuses[node.path] = nextStatus;
-        node.status = nextStatus;
-        saveStatuses();
-        renderMap(treeState);
+      ['green', 'yellow', 'red'].forEach((statusValue) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `status-button ${statusValue}`;
+        button.title = `Set ${statusValue}`;
+        if (node.status === statusValue) button.classList.add('active');
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const nextStatus = node.status === statusValue ? 'none' : statusValue;
+          statuses[node.path] = nextStatus;
+          node.status = nextStatus;
+          saveStatuses();
+          renderCurrentView();
+        });
+        button.addEventListener('mousedown', (event) => {
+          event.stopPropagation();
+        });
+        controls.appendChild(button);
       });
-      button.addEventListener('mousedown', (event) => {
-        event.stopPropagation();
-      });
-      controls.appendChild(button);
-    });
 
-    card.appendChild(controls);
+      if (node.type === 'folder' && (node.descendantStatus?.descendantTotal || 0) > 0) {
+        const reviewedBadge = document.createElement('div');
+        const fullyReviewed = node.descendantStatus.descendantUnassigned === 0;
+        reviewedBadge.className = `map-node-review ${fullyReviewed ? 'is-reviewed' : 'is-pending'}`;
+        reviewedBadge.textContent = fullyReviewed
+          ? '100% reviewed'
+          : `${node.descendantStatus.descendantUnassigned} unassigned`;
+        reviewedBadge.title = fullyReviewed
+          ? 'All descendant nodes have statuses assigned'
+          : `${node.descendantStatus.descendantUnassigned} descendant nodes still need a status`;
+        controls.appendChild(reviewedBadge);
+      }
+
+      card.appendChild(controls);
+    }
     foreignObject.appendChild(card);
     group.appendChild(foreignObject);
   });
@@ -452,9 +660,16 @@ function buildMapSvg(nodes, minWidth = 0, minHeight = 0) {
   return svg;
 }
 
-function renderMap(nodes) {
+function renderMap(nodes, options = {}) {
+  const { readOnly = false } = options;
+  currentRenderedNodes = nodes;
   nodes.forEach((node) => summarizeDescendantStatus(node));
   treeRoot.innerHTML = '';
+
+  if (!nodes.length) {
+    treeRoot.innerHTML = '<div class="empty-state">No nodes match the current filter.</div>';
+    return;
+  }
 
   const viewport = document.createElement('div');
   viewport.className = 'map-viewport';
@@ -463,7 +678,7 @@ function renderMap(nodes) {
 
   const viewportWidth = Math.max(viewport.clientWidth, treeRoot.clientWidth, 900);
   const viewportHeight = Math.max(viewport.clientHeight, treeRoot.clientHeight, 520);
-  const svg = buildMapSvg(nodes, viewportWidth, viewportHeight);
+  const svg = buildMapSvg(nodes, viewportWidth, viewportHeight, { readOnly });
   viewport.appendChild(svg);
 
   const mapContent = svg.querySelector('#mapContent');
@@ -527,6 +742,25 @@ function renderMap(nodes) {
   }, { passive: false });
 }
 
+function renderCurrentView() {
+  if (!treeState.length) {
+    treeRoot.innerHTML = '<div class="empty-state">Loading SQLite snapshot...</div>';
+    updatePreviewSummary();
+    return;
+  }
+
+  if (activeViewMode === 'preview') {
+    const filteredView = buildFilteredViewData();
+    updatePreviewSummary(filteredView);
+    renderMap(filteredView.nodes, { readOnly: true });
+    fitViewToNodes(filteredView.nodes, { readOnly: true });
+    return;
+  }
+
+  updatePreviewSummary();
+  renderMap(treeState, { readOnly: false });
+}
+
 function initializeFromRows(rows) {
   treeState = buildTree(rows);
   if (treeState.length === 0) {
@@ -539,7 +773,7 @@ function initializeFromRows(rows) {
   viewState.offsetY = DEFAULT_VIEW_OFFSET_Y;
   viewState.scale = 1;
 
-  renderMap(treeState);
+  renderCurrentView();
 }
 
 async function bootstrapApp() {
@@ -666,33 +900,58 @@ expandAllButton.addEventListener('click', () => {
   treeState.forEach((node) => {
     expandedPaths.add(node.path);
   });
-  renderMap(treeState);
+  renderCurrentView();
 });
 
 collapseAllButton?.addEventListener('click', () => {
   expandedPaths.clear();
-  renderMap(treeState);
+  renderCurrentView();
 });
 
 zoomInButton.addEventListener('click', () => {
   viewState.scale = Math.min(2.4, viewState.scale + 0.1);
-  renderMap(treeState);
+  renderCurrentView();
 });
 
 zoomOutButton.addEventListener('click', () => {
   viewState.scale = Math.max(0.7, viewState.scale - 0.1);
-  renderMap(treeState);
+  renderCurrentView();
 });
 
 resetViewButton.addEventListener('click', () => {
   viewState.scale = 1;
   viewState.offsetX = DEFAULT_VIEW_OFFSET_X;
   viewState.offsetY = DEFAULT_VIEW_OFFSET_Y;
-  renderMap(treeState);
+  renderCurrentView();
+});
+
+fitViewButton?.addEventListener('click', () => {
+  if (!currentRenderedNodes.length) return;
+  fitViewToNodes(currentRenderedNodes, { readOnly: activeViewMode === 'preview' });
+});
+
+window.addEventListener('resize', () => {
+  if (activeViewMode === 'preview' && currentRenderedNodes.length > 0) {
+    fitViewToNodes(currentRenderedNodes, { readOnly: true });
+  }
 });
 
 shareButton?.addEventListener('click', () => {
   shareCurrentState();
 });
+
+previewFilterButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    setPreviewFilter(button.dataset.previewFilter || 'all');
+  });
+});
+
+sidebarTabButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    setSidebarTab(button.dataset.sidebarTab || 'map');
+  });
+});
+
+setSidebarTab(activeViewMode);
 
 bootstrapApp();

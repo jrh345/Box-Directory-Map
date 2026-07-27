@@ -80,6 +80,35 @@
         flex-wrap: wrap;
       }
 
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        min-height: 520px;
+      }
+
+      .sidebar-tabs {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .sidebar-tab-content {
+        display: none;
+        flex-direction: column;
+        gap: 14px;
+        min-height: 0;
+      }
+
+      .sidebar-tab-content.is-active {
+        display: flex;
+      }
+
+      .map-mode-note {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
       .upload-button,
       .ghost-button,
       .status-button,
@@ -108,6 +137,11 @@
         background: #1e293b;
         color: var(--text);
         padding: 8px 12px;
+      }
+
+      .ghost-button.is-active {
+        background: #2563eb;
+        color: white;
       }
 
       .map-root {
@@ -222,6 +256,28 @@
       .map-node-controls button.status-button.red { background: var(--red); }
       .map-node-controls button.active { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.75); }
 
+      .map-node-review {
+        margin-left: 8px;
+        font-size: 11px;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 999px;
+        white-space: nowrap;
+        align-self: center;
+      }
+
+      .map-node-review.is-reviewed {
+        background: rgba(22, 163, 74, 0.18);
+        color: #86efac;
+        border: 1px solid rgba(22, 163, 74, 0.35);
+      }
+
+      .map-node-review.is-pending {
+        background: rgba(234, 179, 8, 0.14);
+        color: #fde68a;
+        border: 1px solid rgba(234, 179, 8, 0.3);
+      }
+
       .map-toggle {
         width: 20px;
         height: 20px;
@@ -256,6 +312,28 @@
         text-align: center;
       }
 
+      .preview-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: baseline;
+      }
+
+      .preview-summary {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .preview-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .map-node-card.context-only {
+        opacity: 0.78;
+      }
+
       @media (max-width: 900px) {
         .content-grid { grid-template-columns: 1fr; }
         .topbar { flex-direction: column; align-items: stretch; }
@@ -282,6 +360,7 @@
               <button id="zoomOut" class="ghost-button" type="button">−</button>
               <button id="zoomIn" class="ghost-button" type="button">+</button>
               <button id="resetView" class="ghost-button" type="button">Reset view</button>
+              <button id="fitView" class="ghost-button" type="button">Fit view</button>
               <button id="collapseAll" class="ghost-button" type="button">Collapse all</button>
               <button id="expandAll" class="ghost-button" type="button">Expand all</button>
             </div>
@@ -292,17 +371,40 @@
         </section>
 
         <aside class="panel sidebar">
-          <h2>Instructions</h2>
-          <ul>
-            <li>The map loads automatically from the SQLite database snapshot.</li>
-            <li>Use the green/yellow/red controls on each node to mark review status.</li>
-            <li>Click a selected color again to clear it and leave the node transparent.</li>
-            <li>Folders can be collapsed or expanded to move through the structure.</li>
-          </ul>
-          <div class="legend">
-            <div><span class="swatch green"></span> Green</div>
-            <div><span class="swatch yellow"></span> Yellow</div>
-            <div><span class="swatch red"></span> Red</div>
+          <div class="sidebar-tabs">
+            <button class="ghost-button is-active" type="button" data-sidebar-tab="map">Map view</button>
+            <button class="ghost-button" type="button" data-sidebar-tab="preview">Filtered view</button>
+          </div>
+
+          <div class="sidebar-tab-content is-active" data-sidebar-panel="map">
+            <h2>Instructions</h2>
+            <ul>
+              <li>The map loads automatically from the SQLite database snapshot.</li>
+              <li>Use the green/yellow/red controls on each node to mark review status.</li>
+              <li>Click a selected color again to clear it and leave the node transparent.</li>
+              <li>Folders can be collapsed or expanded to move through the structure.</li>
+            </ul>
+            <div class="legend">
+              <div><span class="swatch green"></span> Green</div>
+              <div><span class="swatch yellow"></span> Yellow</div>
+              <div><span class="swatch red"></span> Red</div>
+            </div>
+          </div>
+
+          <div class="sidebar-tab-content" data-sidebar-panel="preview">
+            <div class="preview-header">
+              <h2>Filtered Preview</h2>
+              <div id="previewSummary" class="preview-summary">Switch to preview mode</div>
+            </div>
+            <div class="preview-toolbar">
+              <button class="ghost-button is-active" type="button" data-preview-filter="all">All</button>
+              <button class="ghost-button" type="button" data-preview-filter="unassigned-only">Unassigned</button>
+              <button class="ghost-button" type="button" data-preview-filter="no-red">Hide red</button>
+              <button class="ghost-button" type="button" data-preview-filter="yellow-only">Yellow only</button>
+              <button class="ghost-button" type="button" data-preview-filter="green-only">Green only</button>
+              <button class="ghost-button" type="button" data-preview-filter="red-only">Red only</button>
+            </div>
+            <p class="map-mode-note">Filtered view uses the full map workspace on the left with right-click drag and mouse-wheel zoom. Node statuses are read-only in this mode.</p>
           </div>
         </aside>
       </main>
