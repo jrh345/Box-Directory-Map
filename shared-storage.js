@@ -1,4 +1,9 @@
 (function (global) {
+  function isLocalHostRuntime() {
+    const host = String(global.location?.hostname || '').toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  }
+
   function getSupabaseConfig() {
     const url = global.DRIVE_AUDIT_SUPABASE_URL || '';
     const key = global.DRIVE_AUDIT_SUPABASE_ANON_KEY || '';
@@ -30,8 +35,20 @@
       ? payload.statuses
       : {};
 
-    const rows = Array.isArray(payload.rows) ? payload.rows : [];
-    return { statuses, rows };
+    return { statuses, rows: [] };
+  }
+
+  function normalizeStatusesPayload(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return {};
+    }
+
+    const nestedStatuses = payload.statuses;
+    if (nestedStatuses && typeof nestedStatuses === 'object' && !Array.isArray(nestedStatuses)) {
+      return nestedStatuses;
+    }
+
+    return payload;
   }
 
   async function requestJson(url, options = {}) {
@@ -43,11 +60,28 @@
     return response.json();
   }
 
+  const runtimeInfo = {
+    localTestMode: isLocalHostRuntime(),
+    supabaseConfigured: Boolean(getSupabaseConfig()),
+    supabaseWritesEnabled: !isLocalHostRuntime(),
+    lastReadSource: 'none',
+    lastWriteSource: 'none',
+    lastError: null,
+  };
+
+  function setRuntimeInfo(patch) {
+    Object.assign(runtimeInfo, patch || {});
+  }
+
+  function getRuntimeInfo() {
+    return { ...runtimeInfo };
+  }
+
   async function getStateFromSupabase() {
     const config = getSupabaseConfig();
     if (!config) return null;
 
-    const url = `${config.url}/rest/v1/shared_map_state?id=eq.default&select=id,statuses,rows`;
+    const url = `${config.url}/rest/v1/shared_map_state?id=eq.default&select=id,statuses`;
     const response = await fetch(url, {
       headers: {
         'Content-Type': 'application/json',
@@ -68,45 +102,6 @@
     return normalizeStatePayload(payload[0]);
   }
 
-  async function saveStateToSupabase(state) {
-    const config = getSupabaseConfig();
-    if (!config) return null;
-
-    const payload = {
-      id: 'default',
-      statuses: state.statuses || {},
-      rows: Array.isArray(state.rows) ? state.rows : [],
-    };
-
-    const existing = await getStateFromSupabase();
-    if (!existing) {
-      await fetch(`${config.url}/rest/v1/shared_map_state`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: config.key,
-          Authorization: `Bearer ${config.key}`,
-          Prefer: 'return=representation',
-        },
-        body: JSON.stringify(payload),
-      });
-      return payload;
-    }
-
-    await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.default`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: config.key,
-        Authorization: `Bearer ${config.key}`,
-        Prefer: 'return=representation',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    return payload;
-  }
-
   async function saveStatusesToApi(statuses) {
     const baseUrl = getDefaultApiBase();
     await requestJson(`${baseUrl}/statuses`, {
@@ -119,52 +114,115 @@
   }
 
   async function saveStatusesToSupabase(statuses) {
+    if (runtimeInfo.localTestMode) {
+      setRuntimeInfo({ lastWriteSource: 'local-api', lastError: null });
+      return null;
+    }
+
     const config = getSupabaseConfig();
     if (!config) return null;
 
-    const existing = (await getStateFromSupabase()) || { statuses: {}, rows: [] };
-    const payload = {
-      statuses: statuses || {},
-      rows: Array.isArray(existing.rows) ? existing.rows : [],
-    };
+    const readResponse = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.default&select=id`, {
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+      },
+    });
 
-    return saveStateToSupabase(payload);
+    if (!readResponse.ok && readResponse.status !== 406 && readResponse.status !== 404) {
+      throw new Error(`Supabase read failed with ${readResponse.status}`);
+    }
+
+    const existing = readResponse.ok ? await readResponse.json() : [];
+    const nextStatuses = statuses && typeof statuses === 'object' ? statuses : {};
+
+    if (!Array.isArray(existing) || existing.length === 0) {
+      const createPayload = {
+        id: 'default',
+        statuses: nextStatuses,
+        rows: [],
+      };
+
+      const createResponse = await fetch(`${config.url}/rest/v1/shared_map_state`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: config.key,
+          Authorization: `Bearer ${config.key}`,
+          Prefer: 'return=representation',
+        },
+        body: JSON.stringify(createPayload),
+      });
+
+      if (!createResponse.ok) {
+        throw new Error(`Supabase create failed with ${createResponse.status}`);
+      }
+
+      const createdPayload = await createResponse.json();
+      const createdState = Array.isArray(createdPayload) ? createdPayload[0] : createdPayload;
+      return normalizeStatePayload(createdState);
+    }
+
+    const updateResponse = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.default`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: config.key,
+        Authorization: `Bearer ${config.key}`,
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify({ statuses: nextStatuses }),
+    });
+
+    if (!updateResponse.ok) {
+      throw new Error(`Supabase update failed with ${updateResponse.status}`);
+    }
+
+    const updatedPayload = await updateResponse.json();
+    const updatedState = Array.isArray(updatedPayload) ? updatedPayload[0] : updatedPayload;
+    return normalizeStatePayload(updatedState);
   }
 
   const adapter = {
     async getState() {
       try {
         const supabaseState = await getStateFromSupabase();
-        if (supabaseState) return supabaseState;
-      } catch {
+        if (supabaseState) {
+          setRuntimeInfo({ lastReadSource: 'supabase', lastError: null });
+          return supabaseState;
+        }
+      } catch (error) {
+        setRuntimeInfo({ lastError: error?.message || 'Supabase read failed' });
         // Ignore Supabase failures and fall back to API storage.
       }
 
       try {
-        const response = await requestJson(`${getDefaultApiBase()}/map-state`, { cache: 'no-store' });
-        return normalizeStatePayload(response);
+        const response = await requestJson(`${getDefaultApiBase()}/statuses`, { cache: 'no-store' });
+        setRuntimeInfo({ lastReadSource: 'local-api', lastError: null });
+        return { statuses: normalizeStatusesPayload(response), rows: [] };
       } catch {
+        setRuntimeInfo({ lastReadSource: 'none' });
         return null;
       }
     },
 
     async saveState(state) {
       try {
-        const supabaseState = await saveStateToSupabase(state);
-        if (supabaseState) return supabaseState;
-      } catch {
+        const supabaseState = await saveStatusesToSupabase(state?.statuses || {});
+        if (supabaseState) {
+          setRuntimeInfo({ lastWriteSource: 'supabase', lastError: null });
+          return supabaseState;
+        }
+      } catch (error) {
+        setRuntimeInfo({ lastError: error?.message || 'Supabase write failed' });
         // Ignore Supabase failures and fall back to API storage.
       }
 
       try {
-        const response = await requestJson(`${getDefaultApiBase()}/map-state`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(state),
-        });
-        return normalizeStatePayload(response);
+        await saveStatusesToApi(state?.statuses || {});
+        setRuntimeInfo({ lastWriteSource: 'local-api', lastError: null });
+        return { statuses: state?.statuses || {}, rows: [] };
       } catch {
         return null;
       }
@@ -173,16 +231,25 @@
     async saveStatuses(statuses) {
       try {
         const supabaseState = await saveStatusesToSupabase(statuses);
-        if (supabaseState) return supabaseState;
-      } catch {
+        if (supabaseState) {
+          setRuntimeInfo({ lastWriteSource: 'supabase', lastError: null });
+          return supabaseState;
+        }
+      } catch (error) {
+        setRuntimeInfo({ lastError: error?.message || 'Supabase write failed' });
         // Ignore Supabase failures and fall back to API storage.
       }
 
       try {
         await saveStatusesToApi(statuses);
+        setRuntimeInfo({ lastWriteSource: 'local-api', lastError: null });
       } catch {
         // Ignore status API failures.
       }
+    },
+
+    getSyncInfo() {
+      return getRuntimeInfo();
     },
   };
 

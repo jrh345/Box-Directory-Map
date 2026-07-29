@@ -10,6 +10,7 @@ const zoomInButton = document.getElementById('zoomIn');
 const zoomOutButton = document.getElementById('zoomOut');
 const resetViewButton = document.getElementById('resetView');
 const shareButton = document.getElementById('shareLink');
+const syncIndicator = document.getElementById('syncIndicator');
 
 function logDebug(message, detail) {
   const entry = { message, detail, at: new Date().toISOString() };
@@ -68,6 +69,39 @@ let viewState = {
   dragStartY: 0,
 };
 
+function updateSyncIndicator() {
+  if (!syncIndicator) return;
+
+  const info = window.DriveAuditMapSharedStorage?.getSyncInfo?.();
+  if (!info) {
+    syncIndicator.textContent = 'Status sync: API';
+    syncIndicator.className = 'sync-indicator mode-api';
+    return;
+  }
+
+  const readSource = info.lastReadSource || 'none';
+  const writeSource = info.lastWriteSource || 'none';
+  const lastError = info.lastError ? ` | Last error: ${info.lastError}` : '';
+
+  if (info.localTestMode) {
+    syncIndicator.textContent = 'Local test mode: Supabase writes off';
+    syncIndicator.className = 'sync-indicator mode-local';
+    syncIndicator.title = `Read: ${readSource} | Write: ${writeSource || 'local-api'}${lastError}`;
+    return;
+  }
+
+  if (readSource === 'supabase' || writeSource === 'supabase') {
+    syncIndicator.textContent = 'Status sync: Supabase';
+    syncIndicator.className = 'sync-indicator mode-supabase';
+    syncIndicator.title = `Read: ${readSource} | Write: ${writeSource}${lastError}`;
+    return;
+  }
+
+  syncIndicator.textContent = 'Status sync: API fallback';
+  syncIndicator.className = 'sync-indicator mode-api';
+  syncIndicator.title = `Read: ${readSource} | Write: ${writeSource}${lastError}`;
+}
+
 async function loadStatuses() {
   const localRaw = localStorage.getItem(STORAGE_KEY);
   const fallback = localRaw ? JSON.parse(localRaw) : {};
@@ -77,6 +111,7 @@ async function loadStatuses() {
     if (sharedState?.statuses) {
       statuses = sharedState.statuses;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+      updateSyncIndicator();
       return statuses;
     }
   } catch {
@@ -94,10 +129,12 @@ async function loadStatuses() {
 
     statuses = { ...fallback, ...serverStatuses };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+    updateSyncIndicator();
     return statuses;
   } catch {
     statuses = fallback;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+    updateSyncIndicator();
     return statuses;
   }
 }
@@ -108,6 +145,7 @@ async function syncStatusesFromServer() {
     if (sharedState?.statuses) {
       statuses = sharedState.statuses;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+      updateSyncIndicator();
       return;
     }
   } catch {
@@ -127,8 +165,10 @@ async function syncStatusesFromServer() {
       statuses = serverStatuses;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
     }
+    updateSyncIndicator();
   } catch {
     // Ignore remote sync failures and continue with local state.
+    updateSyncIndicator();
   }
 }
 
@@ -137,8 +177,10 @@ async function saveStatuses() {
 
   try {
     await window.DriveAuditMapSharedStorage?.saveStatuses(statuses);
+    updateSyncIndicator();
   } catch {
     // Ignore shared storage failures and keep the local browser state as the fallback.
+    updateSyncIndicator();
   }
 
   try {
@@ -149,8 +191,10 @@ async function saveStatuses() {
       },
       body: JSON.stringify({ statuses }),
     });
+    updateSyncIndicator();
   } catch {
     // Ignore remote save failures and keep the local browser state as the fallback.
+    updateSyncIndicator();
   }
 }
 
@@ -947,48 +991,15 @@ function expandAllFolders(nodes, expandedSet, maxLevel = EXPAND_ALL_LEVEL_LIMIT,
 
 async function bootstrapApp() {
   logDebug('Bootstrap start', { path: window.location.pathname + window.location.search + window.location.hash });
+  updateSyncIndicator();
   try {
     statuses = await loadStatuses();
     logDebug('Statuses loaded', { statusCount: Object.keys(statuses).length });
-    const loadedFromSharedState = await loadRowsFromSharedState();
-    if (!loadedFromSharedState) {
-      await loadRowsFromDatabase();
-    }
+    await loadRowsFromDatabase();
     startRealtimeSync();
   } catch (error) {
     logDebug('Bootstrap failed', { message: error?.message, stack: error?.stack });
     console.error('Drive audit bootstrap failed', error);
-  }
-}
-
-async function loadRowsFromSharedState() {
-  try {
-    const sharedState = await window.DriveAuditMapSharedStorage?.getState();
-    const rows = Array.isArray(sharedState?.rows) ? sharedState.rows : [];
-
-    if (rows.length === 0) {
-      logDebug('Shared state rows unavailable, falling back to tree data endpoint', {
-        hasSharedState: Boolean(sharedState),
-      });
-      return false;
-    }
-
-    if (sharedState?.statuses && typeof sharedState.statuses === 'object') {
-      statuses = sharedState.statuses;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
-    }
-
-    currentRows = rows;
-    initializeFromRows(rows);
-    lastSharedPayload = { statuses, rows };
-    logDebug('Rows loaded from shared state', { rowCount: rows.length });
-    return true;
-  } catch (error) {
-    logDebug('Shared state row load failed, falling back to tree data endpoint', {
-      message: error?.message,
-      stack: error?.stack,
-    });
-    return false;
   }
 }
 
