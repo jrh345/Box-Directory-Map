@@ -30,6 +30,10 @@
       "use": "@vercel/static"
     },
     {
+      "src": "cascade-wave.png",
+      "use": "@vercel/static"
+    },
+    {
       "src": "api/**/*.js",
       "use": "@vercel/node",
       "config": {
