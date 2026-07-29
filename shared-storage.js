@@ -186,6 +186,17 @@
 
   const adapter = {
     async getState() {
+      if (runtimeInfo.localTestMode) {
+        try {
+          const response = await requestJson(`${getDefaultApiBase()}/statuses`, { cache: 'no-store' });
+          setRuntimeInfo({ lastReadSource: 'local-api', lastError: null });
+          return { statuses: normalizeStatusesPayload(response), rows: [] };
+        } catch {
+          setRuntimeInfo({ lastReadSource: 'none' });
+          return null;
+        }
+      }
+
       try {
         const supabaseState = await getStateFromSupabase();
         if (supabaseState) {

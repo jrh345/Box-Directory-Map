@@ -11,6 +11,7 @@ const zoomOutButton = document.getElementById('zoomOut');
 const resetViewButton = document.getElementById('resetView');
 const shareButton = document.getElementById('shareLink');
 const syncIndicator = document.getElementById('syncIndicator');
+const resyncStatusesButton = document.getElementById('resyncStatuses');
 
 function logDebug(message, detail) {
   const entry = { message, detail, at: new Date().toISOString() };
@@ -139,14 +140,23 @@ async function loadStatuses() {
   }
 }
 
-async function syncStatusesFromServer() {
+async function syncStatusesFromServer(options = {}) {
+  const allowEmpty = Boolean(options.allowEmpty);
+
   try {
     const sharedState = await window.DriveAuditMapSharedStorage?.getState();
-    if (sharedState?.statuses) {
+    const sharedStatuses = sharedState?.statuses;
+    if (sharedStatuses && typeof sharedStatuses === 'object') {
+      const canApply = allowEmpty || Object.keys(sharedStatuses).length > 0;
+      if (!canApply) {
+        updateSyncIndicator();
+        return false;
+      }
+
       statuses = sharedState.statuses;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
       updateSyncIndicator();
-      return;
+      return true;
     }
   } catch {
     // Ignore shared storage failures and continue with local state.
@@ -154,21 +164,68 @@ async function syncStatusesFromServer() {
 
   try {
     const response = await fetch(STATUS_ENDPOINT, { cache: 'no-store' });
-    if (!response.ok) return;
+    if (!response.ok) return false;
 
     const payload = await response.json();
     const serverStatuses = payload?.statuses && typeof payload.statuses === 'object'
       ? payload.statuses
       : (payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {});
 
-    if (Object.keys(serverStatuses).length > 0) {
+    if (allowEmpty || Object.keys(serverStatuses).length > 0) {
       statuses = serverStatuses;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
     }
     updateSyncIndicator();
+    return true;
   } catch {
     // Ignore remote sync failures and continue with local state.
     updateSyncIndicator();
+    return false;
+  }
+}
+
+function setResyncButtonText(text, timeoutMs = 1500) {
+  if (!resyncStatusesButton) return;
+
+  const originalText = resyncStatusesButton.dataset.originalText || resyncStatusesButton.textContent || 'Re-sync statuses';
+  resyncStatusesButton.dataset.originalText = originalText;
+  resyncStatusesButton.textContent = text;
+
+  if (timeoutMs > 0) {
+    window.setTimeout(() => {
+      resyncStatusesButton.textContent = originalText;
+    }, timeoutMs);
+  }
+}
+
+async function resyncStatusesNow() {
+  if (!resyncStatusesButton) return;
+
+  resyncStatusesButton.disabled = true;
+  setResyncButtonText('Re-syncing...', 0);
+
+  const before = JSON.stringify(statuses);
+  try {
+    const didSync = await syncStatusesFromServer({ allowEmpty: true });
+    if (didSync) {
+      refreshStatusesInView();
+      const changed = before !== JSON.stringify(statuses);
+      setResyncButtonText(changed ? 'Re-synced' : 'Already current', 1500);
+      logDebug('Manual status re-sync complete', {
+        changed,
+        statusCount: Object.keys(statuses).length,
+      });
+    } else {
+      setResyncButtonText('Re-sync unavailable', 2200);
+      logDebug('Manual status re-sync unavailable', {
+        statusCount: Object.keys(statuses).length,
+      });
+    }
+  } catch (error) {
+    setResyncButtonText('Re-sync failed', 2200);
+    logDebug('Manual status re-sync failed', { message: error?.message, stack: error?.stack });
+  } finally {
+    resyncStatusesButton.disabled = false;
   }
 }
 
@@ -1153,6 +1210,10 @@ window.addEventListener('resize', () => {
 
 shareButton?.addEventListener('click', () => {
   shareCurrentState();
+});
+
+resyncStatusesButton?.addEventListener('click', () => {
+  resyncStatusesNow();
 });
 
 previewFilterButtons.forEach((button) => {
