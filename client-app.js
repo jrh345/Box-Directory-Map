@@ -513,22 +513,14 @@ function createCascadeWaveIcon() {
 }
 
 function createCascadeIcon() {
-  if (!CASCADE_ICON_URL) {
-    return createCascadeWaveIcon();
-  }
-
+  const imageSrc = CASCADE_ICON_URL || '/cascade-wave.png';
   const img = document.createElement('img');
   img.className = 'cascade-icon-image';
-  img.src = CASCADE_ICON_URL;
+  img.src = imageSrc;
   img.alt = '';
   img.setAttribute('aria-hidden', 'true');
   img.decoding = 'async';
   img.loading = 'eager';
-  img.addEventListener('error', () => {
-    if (!img.parentElement) return;
-    const fallback = createCascadeWaveIcon();
-    img.replaceWith(fallback);
-  }, { once: true });
   return img;
 }
 
