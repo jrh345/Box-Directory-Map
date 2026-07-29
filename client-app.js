@@ -462,7 +462,15 @@ function setDescendantStatuses(node, nextStatus) {
 
 function getBulkApplyStatus(node) {
   const nodeStatus = getNodeStatus(node);
-  return nodeStatus !== 'none' ? nodeStatus : lastBulkStatusChoice;
+  if (nodeStatus !== 'none') {
+    return nodeStatus;
+  }
+
+  if (lastBulkStatusChoice && lastBulkStatusChoice !== 'none') {
+    return lastBulkStatusChoice;
+  }
+
+  return null;
 }
 
 function createCascadeWaveIcon() {
@@ -897,6 +905,17 @@ function buildMapSvg(nodes, minWidth = 0, minHeight = 0, options = {}) {
             event.stopPropagation();
 
             const nextStatus = getBulkApplyStatus(node);
+            if (!nextStatus || nextStatus === 'none') {
+              logDebug('Skipped cascade: no assigned folder status available', {
+                folderPath: node.path,
+                nodeStatus: getNodeStatus(node),
+                lastBulkStatusChoice,
+              });
+              return;
+            }
+
+            statuses[node.path] = nextStatus;
+            node.status = nextStatus;
             const updatedCount = setDescendantStatuses(node, nextStatus);
             if (updatedCount > 0) {
               saveStatuses();
