@@ -46,6 +46,7 @@ const CARD_HEIGHT = 108;
 const ROW_HEIGHT = 136;
 const HORIZONTAL_STEP = 280;
 const REALTIME_SYNC_INTERVAL_MS = 3000;
+const STATUS_SYNC_COOLDOWN_AFTER_SAVE_MS = 2500;
 const DEFAULT_VIEW_OFFSET_X = 12;
 const DEFAULT_VIEW_OFFSET_Y = 24;
 const EXPAND_ALL_LEVEL_LIMIT = 3;
@@ -59,6 +60,9 @@ let currentRows = [];
 let lastSharedPayload = null;
 let realtimeSyncTimer = null;
 let realtimeSyncInFlight = false;
+let pendingStatusSaves = 0;
+let syncBlockedUntilMs = 0;
+let saveStatusesQueue = Promise.resolve();
 let previewFilter = 'all';
 let activeViewMode = 'map';
 let currentRenderedNodes = [];
@@ -146,6 +150,11 @@ async function loadStatuses() {
 
 async function syncStatusesFromServer(options = {}) {
   const allowEmpty = Boolean(options.allowEmpty);
+  const ignoreWriteGuard = Boolean(options.ignoreWriteGuard);
+
+  if (!ignoreWriteGuard && (pendingStatusSaves > 0 || Date.now() < syncBlockedUntilMs)) {
+    return false;
+  }
 
   try {
     const sharedState = await window.DriveAuditMapSharedStorage?.getState();
@@ -210,7 +219,7 @@ async function resyncStatusesNow() {
 
   const before = JSON.stringify(statuses);
   try {
-    const didSync = await syncStatusesFromServer({ allowEmpty: true });
+    const didSync = await syncStatusesFromServer({ allowEmpty: true, ignoreWriteGuard: true });
     if (didSync) {
       refreshStatusesInView();
       const changed = before !== JSON.stringify(statuses);
@@ -236,27 +245,43 @@ async function resyncStatusesNow() {
 async function saveStatuses() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
 
-  try {
-    await window.DriveAuditMapSharedStorage?.saveStatuses(statuses);
-    updateSyncIndicator();
-  } catch {
-    // Ignore shared storage failures and keep the local browser state as the fallback.
-    updateSyncIndicator();
-  }
+  const snapshot = { ...statuses };
+  pendingStatusSaves += 1;
+  syncBlockedUntilMs = Date.now() + STATUS_SYNC_COOLDOWN_AFTER_SAVE_MS;
 
-  try {
-    await fetch(STATUS_ENDPOINT, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ statuses }),
+  const persistSnapshot = async () => {
+    try {
+      await window.DriveAuditMapSharedStorage?.saveStatuses(snapshot);
+      updateSyncIndicator();
+    } catch {
+      // Ignore shared storage failures and keep the local browser state as the fallback.
+      updateSyncIndicator();
+    }
+
+    try {
+      await fetch(STATUS_ENDPOINT, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ statuses: snapshot }),
+      });
+      updateSyncIndicator();
+    } catch {
+      // Ignore remote save failures and keep the local browser state as the fallback.
+      updateSyncIndicator();
+    }
+  };
+
+  saveStatusesQueue = saveStatusesQueue
+    .catch(() => {})
+    .then(persistSnapshot)
+    .finally(() => {
+      pendingStatusSaves = Math.max(0, pendingStatusSaves - 1);
+      syncBlockedUntilMs = Date.now() + STATUS_SYNC_COOLDOWN_AFTER_SAVE_MS;
     });
-    updateSyncIndicator();
-  } catch {
-    // Ignore remote save failures and keep the local browser state as the fallback.
-    updateSyncIndicator();
-  }
+
+  return saveStatusesQueue;
 }
 
 function applyStatusesToTree(nodes) {
@@ -275,7 +300,7 @@ function refreshStatusesInView() {
 }
 
 async function syncStatusesInBackground() {
-  if (realtimeSyncInFlight || !treeState.length) {
+  if (realtimeSyncInFlight || !treeState.length || pendingStatusSaves > 0 || Date.now() < syncBlockedUntilMs) {
     return;
   }
 
