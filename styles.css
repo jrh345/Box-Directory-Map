@@ -16,9 +16,11 @@
 
 body {
   margin: 0;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Segoe UI", "Aptos", "Helvetica Neue", Arial, sans-serif;
   background: linear-gradient(160deg, #0f172a, #111827);
   color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .app-shell {
@@ -131,8 +133,8 @@ p {
 
 .map-node-card {
   width: 220px;
-  height: 72px;
-  padding: 10px 12px;
+  height: 90px;
+  padding: 12px 12px 10px;
   border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.55);
   background: rgba(15, 23, 42, 0.82);
@@ -219,6 +221,7 @@ p {
   display: flex;
   gap: 4px;
   margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 .map-node-controls.read-only {
@@ -226,12 +229,35 @@ p {
 }
 
 .map-node-controls button {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.3);
   cursor: pointer;
   background: transparent;
+  font-family: "Segoe UI", "Aptos", "Helvetica Neue", Arial, sans-serif;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.map-node-controls button.folder-summary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  min-width: 42px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 20px;
+  letter-spacing: 0.01em;
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.map-node-controls button.folder-summary.active {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.88);
 }
 
 .map-node-controls button.status-button.green {
@@ -250,29 +276,45 @@ p {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.75);
 }
 
-.map-node-review {
-  margin-left: auto;
-  padding: 2px 7px;
-  border-radius: 999px;
-  font-size: 10px;
-  line-height: 1.4;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  border: 1px solid transparent;
-  white-space: nowrap;
+.map-node-controls button.map-node-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 24px;
+  padding: 0;
+  border-radius: 7px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(30, 41, 59, 0.95);
+  color: var(--text);
 }
 
-.map-node-review.is-reviewed {
-  color: #bbf7d0;
-  background: rgba(22, 163, 74, 0.18);
-  border-color: rgba(34, 197, 94, 0.45);
+.map-node-controls button.map-node-action:hover {
+  border-color: rgba(255, 255, 255, 0.45);
 }
 
-.map-node-review.is-pending {
-  color: #fde68a;
-  background: rgba(234, 179, 8, 0.2);
-  border-color: rgba(234, 179, 8, 0.45);
+.cascade-icon {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
+
+.cascade-icon-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.map-node-controls .map-node-review {
+  flex: 0 0 100%;
+  margin-top: 2px;
+  margin-left: 0;
+  width: fit-content;
+}
+
+/* Folder summary badge removed in favor of in-button percentages. */
 
 .map-toggle {
   width: 20px;
@@ -280,6 +322,10 @@ p {
   background: transparent;
   color: var(--text);
   border: 1px solid rgba(255, 255, 255, 0.2);
+  font-family: "Segoe UI", "Aptos", "Helvetica Neue", Arial, sans-serif;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .map-connector {

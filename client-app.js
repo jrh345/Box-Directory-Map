@@ -38,9 +38,12 @@ function resolveApiEndpoint(path) {
 const STATUS_ENDPOINT = resolveApiEndpoint('/statuses');
 const TREE_DATA_ENDPOINT = resolveApiEndpoint('/tree-data');
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const CASCADE_ICON_URL = typeof window !== 'undefined'
+  ? String(window.DRIVE_AUDIT_CASCADE_ICON_URL || '').trim()
+  : '';
 const CARD_WIDTH = 220;
-const CARD_HEIGHT = 72;
-const ROW_HEIGHT = 100;
+const CARD_HEIGHT = 108;
+const ROW_HEIGHT = 136;
 const HORIZONTAL_STEP = 280;
 const REALTIME_SYNC_INTERVAL_MS = 3000;
 const DEFAULT_VIEW_OFFSET_X = 12;
@@ -61,6 +64,7 @@ let activeViewMode = 'map';
 let currentRenderedNodes = [];
 let isAutoPruningRender = false;
 let manuallyExpandedPaths = new Set();
+let lastBulkStatusChoice = 'green';
 let viewState = {
   scale: 1,
   offsetX: DEFAULT_VIEW_OFFSET_X,
@@ -387,6 +391,10 @@ function summarizeDescendantStatus(node) {
   let hasRed = false;
   let descendantTotal = 0;
   let descendantUnassigned = 0;
+  let descendantGreen = 0;
+  let descendantYellow = 0;
+  let descendantRed = 0;
+  let descendantNone = 0;
 
   node.children.forEach((child) => {
     const childSummary = summarizeDescendantStatus(child);
@@ -394,6 +402,10 @@ function summarizeDescendantStatus(node) {
     hasRed = hasRed || childSummary.hasRed;
     descendantTotal += 1 + (childSummary.descendantTotal || 0);
     descendantUnassigned += (child.status === 'none' ? 1 : 0) + (childSummary.descendantUnassigned || 0);
+    descendantGreen += (child.status === 'green' ? 1 : 0) + (childSummary.descendantGreen || 0);
+    descendantYellow += (child.status === 'yellow' ? 1 : 0) + (childSummary.descendantYellow || 0);
+    descendantRed += (child.status === 'red' ? 1 : 0) + (childSummary.descendantRed || 0);
+    descendantNone += (child.status === 'none' ? 1 : 0) + (childSummary.descendantNone || 0);
 
     if (child.status === 'yellow') {
       hasYellow = true;
@@ -403,12 +415,121 @@ function summarizeDescendantStatus(node) {
     }
   });
 
-  node.descendantStatus = { hasYellow, hasRed, descendantTotal, descendantUnassigned };
+  node.descendantStatus = {
+    hasYellow,
+    hasRed,
+    descendantTotal,
+    descendantUnassigned,
+    descendantGreen,
+    descendantYellow,
+    descendantRed,
+    descendantNone,
+  };
   return node.descendantStatus;
+}
+
+function formatPercent(value, total) {
+  if (!total) return '0%';
+  return `${Math.round((value / total) * 100)}%`;
 }
 
 function getNodeStatus(node) {
   return statuses[node.path] || 'none';
+}
+
+function setDescendantStatuses(node, nextStatus) {
+  if (!node || node.type !== 'folder' || !node.children.length) {
+    return 0;
+  }
+
+  let updatedCount = 0;
+
+  const walk = (currentNode) => {
+    currentNode.children.forEach((child) => {
+      statuses[child.path] = nextStatus;
+      child.status = nextStatus;
+      updatedCount += 1;
+
+      if (child.children.length > 0) {
+        walk(child);
+      }
+    });
+  };
+
+  walk(node);
+  return updatedCount;
+}
+
+function getBulkApplyStatus(node) {
+  const nodeStatus = getNodeStatus(node);
+  return nodeStatus !== 'none' ? nodeStatus : lastBulkStatusChoice;
+}
+
+function createCascadeWaveIcon() {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 48 28');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.classList.add('cascade-icon');
+
+  const base = document.createElementNS(SVG_NS, 'path');
+  base.setAttribute('d', 'M4 25 C4 12, 12 3, 24 4 C30 4, 35 7, 36 12 C37 16, 33 20, 28 20 C23 20, 21 17, 20 14 C18 17, 18 22, 23 25 Z');
+  base.setAttribute('fill', 'currentColor');
+  base.setAttribute('opacity', '0.95');
+
+  const mid = document.createElementNS(SVG_NS, 'path');
+  mid.setAttribute('d', 'M9 24 C9 15, 15 8, 24 8 C28 8, 31 10, 32 13 C31 12, 30 12, 28 12 C23 12, 20 15, 20 19 C20 21, 21 23, 23 24 Z');
+  mid.setAttribute('fill', 'currentColor');
+  mid.setAttribute('opacity', '0.62');
+
+  const tail = document.createElementNS(SVG_NS, 'path');
+  tail.setAttribute('d', 'M21 23 C28 22, 35 22, 43 24 C37 21, 30 20, 24 20 C22 20, 21 21, 21 23 Z');
+  tail.setAttribute('fill', 'currentColor');
+  tail.setAttribute('opacity', '0.72');
+
+  const highlight = document.createElementNS(SVG_NS, 'path');
+  highlight.setAttribute('d', 'M9 20 C12 12, 18 8, 25 8 C17 6, 11 11, 9 20 Z');
+  highlight.setAttribute('fill', '#ffffff');
+  highlight.setAttribute('opacity', '0.35');
+
+  const splashA = document.createElementNS(SVG_NS, 'circle');
+  splashA.setAttribute('cx', '34');
+  splashA.setAttribute('cy', '10');
+  splashA.setAttribute('r', '1.7');
+  splashA.setAttribute('fill', 'currentColor');
+
+  const splashB = document.createElementNS(SVG_NS, 'circle');
+  splashB.setAttribute('cx', '36.5');
+  splashB.setAttribute('cy', '12.5');
+  splashB.setAttribute('r', '1.3');
+  splashB.setAttribute('fill', 'currentColor');
+
+  svg.appendChild(base);
+  svg.appendChild(mid);
+  svg.appendChild(tail);
+  svg.appendChild(highlight);
+  svg.appendChild(splashA);
+  svg.appendChild(splashB);
+  return svg;
+}
+
+function createCascadeIcon() {
+  if (!CASCADE_ICON_URL) {
+    return createCascadeWaveIcon();
+  }
+
+  const img = document.createElement('img');
+  img.className = 'cascade-icon-image';
+  img.src = CASCADE_ICON_URL;
+  img.alt = '';
+  img.setAttribute('aria-hidden', 'true');
+  img.decoding = 'async';
+  img.loading = 'eager';
+  img.addEventListener('error', () => {
+    if (!img.parentElement) return;
+    const fallback = createCascadeWaveIcon();
+    img.replaceWith(fallback);
+  }, { once: true });
+  return img;
 }
 
 function doesNodeMatchPreviewFilter(node, filter) {
@@ -680,6 +801,7 @@ function buildMapSvg(nodes, minWidth = 0, minHeight = 0, options = {}) {
       modeClasses.push('context-only');
     }
     card.className = `map-node-card status-${node.status} ${modeClasses.join(' ')} ${descendantClasses.join(' ')}`.trim();
+    card.style.height = `${CARD_HEIGHT}px`;
 
     const titleRow = document.createElement('div');
     titleRow.className = 'map-node-title';
@@ -720,36 +842,35 @@ function buildMapSvg(nodes, minWidth = 0, minHeight = 0, options = {}) {
     titleRow.appendChild(type);
     card.appendChild(titleRow);
 
-    const hasDescendantSummary = node.type === 'folder' && (node.descendantStatus?.descendantTotal || 0) > 0;
-    const reviewedBadge = hasDescendantSummary
-      ? (() => {
-        const badge = document.createElement('div');
-        const fullyReviewed = node.descendantStatus.descendantUnassigned === 0;
-        badge.className = `map-node-review ${fullyReviewed ? 'is-reviewed' : 'is-pending'}`;
-        badge.textContent = fullyReviewed
-          ? '100% reviewed'
-          : `${node.descendantStatus.descendantUnassigned} unassigned`;
-        badge.title = fullyReviewed
-          ? 'All descendant nodes have statuses assigned'
-          : `${node.descendantStatus.descendantUnassigned} descendant nodes still need a status`;
-        return badge;
-      })()
-      : null;
-
     if (!readOnly) {
       const controls = document.createElement('div');
       controls.className = 'map-node-controls';
+      const folderStatusSummary = node.type === 'folder' && (node.descendantStatus?.descendantTotal || 0) > 0;
+      const statusPercentages = folderStatusSummary
+        ? {
+          green: formatPercent(node.descendantStatus.descendantGreen || 0, node.descendantStatus.descendantTotal),
+          yellow: formatPercent(node.descendantStatus.descendantYellow || 0, node.descendantStatus.descendantTotal),
+          red: formatPercent(node.descendantStatus.descendantRed || 0, node.descendantStatus.descendantTotal),
+        }
+        : null;
 
       ['green', 'yellow', 'red'].forEach((statusValue) => {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = `status-button ${statusValue}`;
-        button.title = `Set ${statusValue}`;
+        if (folderStatusSummary) {
+          button.classList.add('folder-summary');
+          button.textContent = statusPercentages[statusValue] || '0%';
+          button.title = `${statusValue}: ${statusPercentages[statusValue] || '0%'} of descendant nodes`;
+        } else {
+          button.title = `Set ${statusValue}`;
+        }
         if (node.status === statusValue) button.classList.add('active');
         button.addEventListener('click', (event) => {
           event.preventDefault();
           event.stopPropagation();
           const nextStatus = node.status === statusValue ? 'none' : statusValue;
+          lastBulkStatusChoice = statusValue;
           statuses[node.path] = nextStatus;
           node.status = nextStatus;
           saveStatuses();
@@ -761,16 +882,55 @@ function buildMapSvg(nodes, minWidth = 0, minHeight = 0, options = {}) {
         controls.appendChild(button);
       });
 
-      if (reviewedBadge) {
-        controls.appendChild(reviewedBadge);
+      if (folderStatusSummary) {
+        const badge = document.createElement('div');
+        const fullyReviewed = node.descendantStatus.descendantNone === 0;
+        badge.className = `map-node-review ${fullyReviewed ? 'is-reviewed' : 'is-pending'}`;
+        badge.textContent = fullyReviewed
+          ? '100% reviewed'
+          : `${node.descendantStatus.descendantNone} unassigned`;
+        badge.title = fullyReviewed
+          ? 'All descendant nodes have statuses assigned'
+          : `${node.descendantStatus.descendantNone} descendant nodes still need a status`;
+
+        if (node.type === 'folder' && node.children.length > 0) {
+          const applyAllButton = document.createElement('button');
+          applyAllButton.type = 'button';
+          applyAllButton.className = 'map-node-action';
+          applyAllButton.setAttribute('aria-label', 'Cascade');
+          applyAllButton.title = 'Cascade this folder status to all descendant nodes';
+          applyAllButton.appendChild(createCascadeIcon());
+          applyAllButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            const nextStatus = getBulkApplyStatus(node);
+            const updatedCount = setDescendantStatuses(node, nextStatus);
+            if (updatedCount > 0) {
+              saveStatuses();
+              applyStatusesToTree(treeState);
+              renderCurrentView();
+              logDebug('Applied folder status to descendants', {
+                folderPath: node.path,
+                status: nextStatus,
+                updatedCount,
+              });
+            }
+          });
+          applyAllButton.addEventListener('mousedown', (event) => {
+            event.stopPropagation();
+          });
+          controls.appendChild(applyAllButton);
+        }
+
+        controls.appendChild(badge);
+      }
+
+      if (node.type === 'folder' && node.children.length > 0) {
+        // Cascade button is appended with the completion badge above.
       }
 
       card.appendChild(controls);
-    } else if (reviewedBadge) {
-      const readOnlySummary = document.createElement('div');
-      readOnlySummary.className = 'map-node-controls read-only';
-      readOnlySummary.appendChild(reviewedBadge);
-      card.appendChild(readOnlySummary);
     }
     foreignObject.appendChild(card);
     group.appendChild(foreignObject);
