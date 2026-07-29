@@ -345,7 +345,7 @@
       <header class="topbar">
         <div>
           <h1>Cloud Drive Audit Map</h1>
-          <p>Review the SQLite-backed structure map (auto-loaded at startup).</p>
+          <p>Review the shared tree structure map (auto-loaded at startup).</p>
         </div>
         <div class="topbar-actions">
           <button id="shareLink" class="ghost-button" type="button">Copy share link</button>
@@ -366,7 +366,7 @@
             </div>
           </div>
           <div id="treeRoot" class="map-root">
-            <div class="empty-state">Loading SQLite snapshot...</div>
+            <div class="empty-state">Loading tree snapshot...</div>
           </div>
         </section>
 
@@ -379,7 +379,7 @@
           <div class="sidebar-tab-content is-active" data-sidebar-panel="map">
             <h2>Instructions</h2>
             <ul>
-              <li>The map loads automatically from the SQLite database snapshot.</li>
+              <li>The map loads automatically from the latest tree snapshot.</li>
               <li>Use the green/yellow/red controls on each node to mark review status.</li>
               <li>Click a selected color again to clear it and leave the node transparent.</li>
               <li>Folders can be collapsed or expanded to move through the structure.</li>

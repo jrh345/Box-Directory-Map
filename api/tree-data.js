@@ -1,3 +1,5 @@
+const { FILELIST_PATH, readRowsFromFilelist } = require('../lib/filelist-tree-data');
+const { GRAPH_JSON_PATH, TREE_JSON_PATH, readRowsFromGraphJson, readRowsFromTreeJson } = require('../lib/json-tree-data');
 const { readRowsFromSqlite, DB_PATH } = require('../lib/sqlite-tree-data');
 
 function sendJson(res, statusCode, payload) {
@@ -22,10 +24,40 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const rows = readRowsFromSqlite();
+    const filelistRows = readRowsFromFilelist();
+    if (filelistRows.length > 0) {
+      sendJson(res, 200, {
+        rows: filelistRows,
+        rowCount: filelistRows.length,
+        source: FILELIST_PATH,
+      });
+      return;
+    }
+
+    const treeRows = readRowsFromTreeJson();
+    if (treeRows.length > 0) {
+      sendJson(res, 200, {
+        rows: treeRows,
+        rowCount: treeRows.length,
+        source: TREE_JSON_PATH,
+      });
+      return;
+    }
+
+    const graphRows = readRowsFromGraphJson();
+    if (graphRows.length > 0) {
+      sendJson(res, 200, {
+        rows: graphRows,
+        rowCount: graphRows.length,
+        source: GRAPH_JSON_PATH,
+      });
+      return;
+    }
+
+    const fallbackRows = readRowsFromSqlite();
     sendJson(res, 200, {
-      rows,
-      rowCount: rows.length,
+      rows: fallbackRows,
+      rowCount: fallbackRows.length,
       source: DB_PATH,
     });
   } catch (error) {

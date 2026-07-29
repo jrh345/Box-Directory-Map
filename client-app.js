@@ -889,7 +889,7 @@ function maybePruneUnusedNodesForPerformance(renderMetrics) {
 
 function renderCurrentView() {
   if (!treeState.length) {
-    treeRoot.innerHTML = '<div class="empty-state">Loading SQLite snapshot...</div>';
+    treeRoot.innerHTML = '<div class="empty-state">Loading tree snapshot...</div>';
     updatePreviewSummary();
     return;
   }
@@ -918,7 +918,7 @@ function renderCurrentView() {
 function initializeFromRows(rows) {
   treeState = buildTree(rows);
   if (treeState.length === 0) {
-    treeRoot.innerHTML = '<p>No valid rows were found in the SQLite snapshot.</p>';
+    treeRoot.innerHTML = '<p>No valid rows were found in the tree snapshot.</p>';
     return;
   }
 
@@ -967,7 +967,7 @@ async function loadRowsFromSharedState() {
     const rows = Array.isArray(sharedState?.rows) ? sharedState.rows : [];
 
     if (rows.length === 0) {
-      logDebug('Shared state rows unavailable, falling back to SQLite', {
+      logDebug('Shared state rows unavailable, falling back to tree data endpoint', {
         hasSharedState: Boolean(sharedState),
       });
       return false;
@@ -984,7 +984,7 @@ async function loadRowsFromSharedState() {
     logDebug('Rows loaded from shared state', { rowCount: rows.length });
     return true;
   } catch (error) {
-    logDebug('Shared state row load failed, falling back to SQLite', {
+    logDebug('Shared state row load failed, falling back to tree data endpoint', {
       message: error?.message,
       stack: error?.stack,
     });
@@ -993,20 +993,20 @@ async function loadRowsFromSharedState() {
 }
 
 async function loadRowsFromDatabase() {
-  logDebug('SQLite load start', { endpoint: TREE_DATA_ENDPOINT });
+  logDebug('Tree data load start', { endpoint: TREE_DATA_ENDPOINT });
 
   try {
     const response = await fetch(TREE_DATA_ENDPOINT, { cache: 'no-store' });
     if (!response.ok) {
-      throw new Error(`SQLite endpoint returned ${response.status}`);
+      throw new Error(`Tree data endpoint returned ${response.status}`);
     }
 
     const payload = await response.json();
     const rows = Array.isArray(payload?.rows) ? payload.rows : [];
-    logDebug('SQLite rows received', { rowCount: rows.length, source: payload?.source || null });
+    logDebug('Tree rows received', { rowCount: rows.length, source: payload?.source || null });
 
     if (rows.length === 0) {
-      treeRoot.innerHTML = '<div class="empty-state">SQLite snapshot is empty. Import data into the database first.</div>';
+      treeRoot.innerHTML = '<div class="empty-state">Tree snapshot is empty. Import the JSON source first.</div>';
       return;
     }
 
@@ -1014,11 +1014,11 @@ async function loadRowsFromDatabase() {
     await syncStatusesFromServer();
     initializeFromRows(rows);
     lastSharedPayload = { statuses, rows };
-    logDebug('SQLite load complete', { rowCount: rows.length });
+    logDebug('Tree data load complete', { rowCount: rows.length });
   } catch (error) {
-    logDebug('SQLite load failed', { message: error?.message, stack: error?.stack });
-    console.error('Drive audit SQLite load failed', error);
-    treeRoot.innerHTML = '<div class="empty-state">Failed to load SQLite snapshot. Check server logs and console details.</div>';
+    logDebug('Tree data load failed', { message: error?.message, stack: error?.stack });
+    console.error('Drive audit tree data load failed', error);
+    treeRoot.innerHTML = '<div class="empty-state">Failed to load tree snapshot. Check server logs and console details.</div>';
   }
 }
 
