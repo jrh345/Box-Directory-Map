@@ -96,6 +96,7 @@
   const SUPABASE_NODE_STATUS_UPSERT_CHUNK = 500;
   let supabaseNodeStatusesAvailable = null;
   let lastSupabaseStatusesSnapshot = null;
+  let lastNodeStatusesSyncAt = null; // ISO timestamp cursor for delta polling
 
   async function requestJson(url, options = {}) {
     const response = await fetch(url, options);
@@ -163,13 +164,18 @@
     throw new Error(`Supabase node_statuses probe failed with ${response.status}${detail ? `: ${detail}` : ''}`);
   }
 
-  async function fetchNodeStatusesFromSupabase(config) {
+  async function fetchNodeStatusesFromSupabase(config, since = null) {
+    // statuses includes 'none' entries when doing a delta fetch (since !== null),
+    // because a row flipping back to 'none' is itself a change the caller needs
+    // to know about so it can remove that path from its cached snapshot.
     const statuses = {};
     let from = 0;
+    let maxUpdatedAt = since;
 
     while (true) {
       const to = from + SUPABASE_NODE_STATUS_PAGE_SIZE - 1;
-      const url = `${config.url}/rest/v1/node_statuses?select=node_path,status&order=node_path.asc`;
+      const sinceFilter = since ? `&updated_at=gt.${encodeURIComponent(since)}` : '';
+      const url = `${config.url}/rest/v1/node_statuses?select=node_path,status,updated_at&order=updated_at.asc${sinceFilter}`;
       const response = await fetch(url, {
         headers: buildSupabaseHeaders(config, {
           Range: `${from}-${to}`,
@@ -189,9 +195,11 @@
       rows.forEach((row) => {
         const path = row?.node_path;
         const status = row?.status;
-        if (!path || typeof path !== 'string') return;
-        if (status === 'green' || status === 'yellow' || status === 'red') {
+        if (path && typeof path === 'string' && (status === 'green' || status === 'yellow' || status === 'red' || status === 'none')) {
           statuses[path] = status;
+        }
+        if (row?.updated_at && (!maxUpdatedAt || row.updated_at > maxUpdatedAt)) {
+          maxUpdatedAt = row.updated_at;
         }
       });
 
@@ -201,7 +209,17 @@
       from += SUPABASE_NODE_STATUS_PAGE_SIZE;
     }
 
-    return statuses;
+    return { statuses, maxUpdatedAt };
+  }
+
+  function stripNoneStatuses(map) {
+    const cleaned = {};
+    Object.entries(map || {}).forEach(([path, status]) => {
+      if (status === 'green' || status === 'yellow' || status === 'red') {
+        cleaned[path] = status;
+      }
+    });
+    return cleaned;
   }
 
   function buildChangedStatusRows(previousStatuses, nextStatuses) {
@@ -241,22 +259,34 @@
   }
 
   async function upsertNodeStatusesToSupabase(config, rows) {
-    if (!rows.length) return;
+    if (!rows.length) return null;
+
+    let maxUpdatedAt = null;
 
     for (let index = 0; index < rows.length; index += SUPABASE_NODE_STATUS_UPSERT_CHUNK) {
       const chunk = rows.slice(index, index + SUPABASE_NODE_STATUS_UPSERT_CHUNK);
-      await requestSupabaseJson(
-        `${config.url}/rest/v1/node_statuses?on_conflict=node_path`,
+      const written = await requestSupabaseJson(
+        `${config.url}/rest/v1/node_statuses?on_conflict=node_path&select=updated_at`,
         {
           method: 'POST',
           headers: buildSupabaseHeaders(config, {
-            Prefer: 'resolution=merge-duplicates,return=minimal',
+            Prefer: 'resolution=merge-duplicates,return=representation',
           }),
           body: JSON.stringify(chunk),
         },
         'supabase-node-statuses-upsert'
       );
+
+      if (Array.isArray(written)) {
+        written.forEach((row) => {
+          if (row?.updated_at && (!maxUpdatedAt || row.updated_at > maxUpdatedAt)) {
+            maxUpdatedAt = row.updated_at;
+          }
+        });
+      }
     }
+
+    return maxUpdatedAt;
   }
 
   async function getLegacyStateFromSupabase(config) {
@@ -299,15 +329,45 @@
     if (!config) return null;
 
     if (await ensureNodeStatusesAvailability(config)) {
-      const rowStatuses = await fetchNodeStatusesFromSupabase(config);
-      const rowStatusCount = Object.keys(rowStatuses).length;
+      // Fast path: we already have a full mirror cached locally, so only ask
+      // Supabase for rows changed since our last sync instead of the whole table.
+      if (lastSupabaseStatusesSnapshot && lastNodeStatusesSyncAt) {
+        const { statuses: deltaStatuses, maxUpdatedAt } = await fetchNodeStatusesFromSupabase(
+          config,
+          lastNodeStatusesSyncAt
+        );
+
+        const changedCount = Object.keys(deltaStatuses).length;
+        if (changedCount > 0) {
+          Object.entries(deltaStatuses).forEach(([path, status]) => {
+            if (status === 'none') {
+              delete lastSupabaseStatusesSnapshot[path];
+            } else {
+              lastSupabaseStatusesSnapshot[path] = status;
+            }
+          });
+          logStorageDebug('supabase-node-statuses delta applied', { changedRows: changedCount });
+        }
+
+        if (maxUpdatedAt) {
+          lastNodeStatusesSyncAt = maxUpdatedAt;
+        }
+
+        return { statuses: { ...lastSupabaseStatusesSnapshot }, rows: [] };
+      }
+
+      // First read (or cache was cleared): full fetch once, then switch to delta polling.
+      const { statuses: rowStatuses, maxUpdatedAt } = await fetchNodeStatusesFromSupabase(config);
+      const cleanedRowStatuses = stripNoneStatuses(rowStatuses);
+      const rowStatusCount = Object.keys(cleanedRowStatuses).length;
 
       if (rowStatusCount > 0) {
-        lastSupabaseStatusesSnapshot = { ...rowStatuses };
+        lastSupabaseStatusesSnapshot = { ...cleanedRowStatuses };
+        lastNodeStatusesSyncAt = maxUpdatedAt || new Date().toISOString();
         logStorageDebug('supabase-node-statuses read complete', {
           count: rowStatusCount,
         });
-        return { statuses: rowStatuses, rows: [] };
+        return { statuses: cleanedRowStatuses, rows: [] };
       }
 
       const legacyState = await getLegacyStateFromSupabase(config);
@@ -317,6 +377,7 @@
         const seedRows = buildNodeStatusRowsFromSnapshot(legacyStatuses);
         await upsertNodeStatusesToSupabase(config, seedRows);
         lastSupabaseStatusesSnapshot = { ...legacyStatuses };
+        lastNodeStatusesSyncAt = new Date().toISOString();
         logStorageDebug('supabase-node-statuses backfilled from shared_map_state', {
           seededRows: seedRows.length,
         });
@@ -324,6 +385,7 @@
       }
 
       lastSupabaseStatusesSnapshot = {};
+      lastNodeStatusesSyncAt = new Date().toISOString();
       logStorageDebug('supabase-node-statuses is empty and no legacy statuses found', {});
       return { statuses: {}, rows: [] };
     }
@@ -354,12 +416,21 @@
 
     if (await ensureNodeStatusesAvailability(config)) {
       if (!lastSupabaseStatusesSnapshot) {
-        lastSupabaseStatusesSnapshot = await fetchNodeStatusesFromSupabase(config);
+        const { statuses: warmupStatuses, maxUpdatedAt } = await fetchNodeStatusesFromSupabase(config);
+        lastSupabaseStatusesSnapshot = stripNoneStatuses(warmupStatuses);
+        lastNodeStatusesSyncAt = maxUpdatedAt || new Date().toISOString();
       }
 
       const changedRows = buildChangedStatusRows(lastSupabaseStatusesSnapshot, nextStatuses);
-      await upsertNodeStatusesToSupabase(config, changedRows);
+      const writtenMaxUpdatedAt = await upsertNodeStatusesToSupabase(config, changedRows);
       lastSupabaseStatusesSnapshot = { ...nextStatuses };
+      // Our own write also bumps updated_at via the trigger; advance the cursor
+      // to the server's own timestamp (not the client clock) so the next poll's
+      // delta fetch doesn't re-download rows we just wrote, and isn't thrown off
+      // by any client/server clock skew.
+      if (writtenMaxUpdatedAt && (!lastNodeStatusesSyncAt || writtenMaxUpdatedAt > lastNodeStatusesSyncAt)) {
+        lastNodeStatusesSyncAt = writtenMaxUpdatedAt;
+      }
       logStorageDebug('supabase-node-statuses write complete', {
         changedRows: changedRows.length,
         statusCount: Object.keys(nextStatuses).length,

@@ -44,7 +44,7 @@ const CARD_WIDTH = 220;
 const CARD_HEIGHT = 108;
 const ROW_HEIGHT = 136;
 const HORIZONTAL_STEP = 280;
-const REALTIME_SYNC_INTERVAL_MS = 3000;
+const REALTIME_SYNC_INTERVAL_MS = 8000;
 const STATUS_SYNC_COOLDOWN_AFTER_SAVE_MS = 2500;
 const DEFAULT_VIEW_OFFSET_X = 12;
 const DEFAULT_VIEW_OFFSET_Y = 24;
@@ -190,6 +190,7 @@ async function syncStatusesFromServer(options = {}) {
     if (!ignoreWriteGuard && (pendingStatusSaves > 0 || Date.now() < syncBlockedUntilMs)) {
       return false;
     }
+
     const sharedStatuses = sharedState?.statuses;
     if (sharedStatuses && typeof sharedStatuses === 'object') {
       const canApply = allowEmpty || Object.keys(sharedStatuses).length > 0;
