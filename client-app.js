@@ -77,6 +77,48 @@ let viewState = {
   dragStartY: 0,
 };
 
+function normalizeStatusesMap(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return {};
+  }
+
+  const cleaned = {};
+  Object.entries(input).forEach(([path, status]) => {
+    if (!path || typeof path !== 'string') return;
+    if (status === 'green' || status === 'yellow' || status === 'red') {
+      cleaned[path] = status;
+    }
+  });
+  return cleaned;
+}
+
+function readStatusesFromLocalCache() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return normalizeStatusesMap(parsed);
+  } catch {
+    return {};
+  }
+}
+
+function writeStatusesToLocalCache(nextStatuses) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeStatusesMap(nextStatuses)));
+    return true;
+  } catch (error) {
+    if (error && (error.name === 'QuotaExceededError' || error.code === 22)) {
+      logDebug('Local status cache skipped: storage quota exceeded', {
+        statusCount: Object.keys(nextStatuses || {}).length,
+      });
+      return false;
+    }
+    logDebug('Local status cache write failed', { message: error?.message });
+    return false;
+  }
+}
+
 function updateSyncIndicator() {
   if (!syncIndicator) return;
 
@@ -111,14 +153,13 @@ function updateSyncIndicator() {
 }
 
 async function loadStatuses() {
-  const localRaw = localStorage.getItem(STORAGE_KEY);
-  const fallback = localRaw ? JSON.parse(localRaw) : {};
+  const fallback = readStatusesFromLocalCache();
 
   try {
     const sharedState = await window.DriveAuditMapSharedStorage?.getState();
     if (sharedState?.statuses) {
-      statuses = sharedState.statuses;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+      statuses = normalizeStatusesMap(sharedState.statuses);
+      writeStatusesToLocalCache(statuses);
       updateSyncIndicator();
       return statuses;
     }
@@ -126,8 +167,8 @@ async function loadStatuses() {
     // Ignore shared storage failures and continue with local state.
   }
 
-  statuses = fallback;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+  statuses = normalizeStatusesMap(fallback);
+  writeStatusesToLocalCache(statuses);
   updateSyncIndicator();
   return statuses;
 }
@@ -150,8 +191,8 @@ async function syncStatusesFromServer(options = {}) {
         return false;
       }
 
-      statuses = sharedState.statuses;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+      statuses = normalizeStatusesMap(sharedState.statuses);
+      writeStatusesToLocalCache(statuses);
       updateSyncIndicator();
       return true;
     }
@@ -210,7 +251,8 @@ async function resyncStatusesNow() {
 }
 
 async function saveStatuses() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+  statuses = normalizeStatusesMap(statuses);
+  writeStatusesToLocalCache(statuses);
 
   const snapshot = { ...statuses };
   pendingStatusSaves += 1;
@@ -304,7 +346,7 @@ function startRealtimeSync() {
     }
 
     try {
-      statuses = JSON.parse(event.newValue);
+      statuses = normalizeStatusesMap(JSON.parse(event.newValue));
       refreshStatusesInView();
       logDebug('Statuses refreshed from local storage event', { statusCount: Object.keys(statuses).length });
     } catch {
@@ -428,7 +470,11 @@ function setDescendantStatuses(node, nextStatus) {
 
   const walk = (currentNode) => {
     currentNode.children.forEach((child) => {
-      statuses[child.path] = nextStatus;
+      if (nextStatus === 'none') {
+        delete statuses[child.path];
+      } else {
+        statuses[child.path] = nextStatus;
+      }
       child.status = nextStatus;
       updatedCount += 1;
 
@@ -853,7 +899,11 @@ function buildMapSvg(nodes, minWidth = 0, minHeight = 0, options = {}) {
           event.stopPropagation();
           const nextStatus = node.status === statusValue ? 'none' : statusValue;
           lastBulkStatusChoice = statusValue;
-          statuses[node.path] = nextStatus;
+          if (nextStatus === 'none') {
+            delete statuses[node.path];
+          } else {
+            statuses[node.path] = nextStatus;
+          }
           node.status = nextStatus;
           saveStatuses();
           renderCurrentView();
