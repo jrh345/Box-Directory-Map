@@ -68,6 +68,7 @@
     lastWriteSource: 'none',
     lastError: null,
   };
+  const strictSupabaseMode = !runtimeInfo.localTestMode && runtimeInfo.supabaseConfigured;
 
   function setRuntimeInfo(patch) {
     Object.assign(runtimeInfo, patch || {});
@@ -205,6 +206,10 @@
         }
       } catch (error) {
         setRuntimeInfo({ lastError: error?.message || 'Supabase read failed' });
+        if (strictSupabaseMode) {
+          setRuntimeInfo({ lastReadSource: 'none' });
+          return null;
+        }
         // Ignore Supabase failures and fall back to API storage.
       }
 
@@ -227,6 +232,9 @@
         }
       } catch (error) {
         setRuntimeInfo({ lastError: error?.message || 'Supabase write failed' });
+        if (strictSupabaseMode) {
+          return null;
+        }
         // Ignore Supabase failures and fall back to API storage.
       }
 
@@ -248,6 +256,9 @@
         }
       } catch (error) {
         setRuntimeInfo({ lastError: error?.message || 'Supabase write failed' });
+        if (strictSupabaseMode) {
+          return null;
+        }
         // Ignore Supabase failures and fall back to API storage.
       }
 

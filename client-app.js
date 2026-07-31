@@ -35,7 +35,6 @@ function resolveApiEndpoint(path) {
 
   return `/api${path}`;
 }
-const STATUS_ENDPOINT = resolveApiEndpoint('/statuses');
 const TREE_DATA_ENDPOINT = resolveApiEndpoint('/tree-data');
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const CASCADE_ICON_URL = typeof window !== 'undefined'
@@ -127,25 +126,10 @@ async function loadStatuses() {
     // Ignore shared storage failures and continue with local state.
   }
 
-  try {
-    const response = await fetch(STATUS_ENDPOINT, { cache: 'no-store' });
-    if (!response.ok) return fallback;
-
-    const payload = await response.json();
-    const serverStatuses = payload?.statuses && typeof payload.statuses === 'object'
-      ? payload.statuses
-      : (payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {});
-
-    statuses = { ...fallback, ...serverStatuses };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
-    updateSyncIndicator();
-    return statuses;
-  } catch {
-    statuses = fallback;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
-    updateSyncIndicator();
-    return statuses;
-  }
+  statuses = fallback;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
+  updateSyncIndicator();
+  return statuses;
 }
 
 async function syncStatusesFromServer(options = {}) {
@@ -175,26 +159,9 @@ async function syncStatusesFromServer(options = {}) {
     // Ignore shared storage failures and continue with local state.
   }
 
-  try {
-    const response = await fetch(STATUS_ENDPOINT, { cache: 'no-store' });
-    if (!response.ok) return false;
-
-    const payload = await response.json();
-    const serverStatuses = payload?.statuses && typeof payload.statuses === 'object'
-      ? payload.statuses
-      : (payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {});
-
-    if (allowEmpty || Object.keys(serverStatuses).length > 0) {
-      statuses = serverStatuses;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(statuses));
-    }
-    updateSyncIndicator();
-    return true;
-  } catch {
-    // Ignore remote sync failures and continue with local state.
-    updateSyncIndicator();
-    return false;
-  }
+  // Ignore remote sync failures and continue with local state.
+  updateSyncIndicator();
+  return false;
 }
 
 function setResyncButtonText(text, timeoutMs = 1500) {
@@ -255,20 +222,6 @@ async function saveStatuses() {
       updateSyncIndicator();
     } catch {
       // Ignore shared storage failures and keep the local browser state as the fallback.
-      updateSyncIndicator();
-    }
-
-    try {
-      await fetch(STATUS_ENDPOINT, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ statuses: snapshot }),
-      });
-      updateSyncIndicator();
-    } catch {
-      // Ignore remote save failures and keep the local browser state as the fallback.
       updateSyncIndicator();
     }
   };
