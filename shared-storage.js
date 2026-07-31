@@ -1,4 +1,45 @@
 (function (global) {
+  function logStorageDebug(message, detail) {
+    const entry = { scope: 'shared-storage', message, detail, at: new Date().toISOString() };
+    global.__driveAuditDebug = global.__driveAuditDebug || [];
+    global.__driveAuditDebug.push(entry);
+    console.debug('[drive-audit][storage]', message, detail || '');
+  }
+
+  async function readErrorText(response) {
+    try {
+      return await response.text();
+    } catch {
+      return '';
+    }
+  }
+
+  async function requestSupabaseJson(url, options = {}, label = 'supabase-request') {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+      const detail = await readErrorText(response);
+      logStorageDebug(`${label} failed`, {
+        url,
+        status: response.status,
+        detail,
+      });
+      const suffix = detail ? `: ${detail}` : '';
+      throw new Error(`${label} failed with ${response.status}${suffix}`);
+    }
+
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    logStorageDebug(`${label} ok`, {
+      url,
+      status: response.status,
+    });
+    return payload;
+  }
+
   function isLocalHostRuntime() {
     const host = String(global.location?.hostname || '').toLowerCase();
     return host === 'localhost' || host === '127.0.0.1' || host === '::1';
@@ -82,7 +123,8 @@
     const config = getSupabaseConfig();
     if (!config) return null;
 
-    const response = await fetch(`${config.url}/rest/v1/shared_map_state?select=id,statuses&limit=1`, {
+    const url = `${config.url}/rest/v1/shared_map_state?select=id,statuses&limit=1`;
+    const response = await fetch(url, {
       headers: {
         'Content-Type': 'application/json',
         apikey: config.key,
@@ -91,13 +133,24 @@
     });
 
     if (!response.ok) {
+      const detail = await readErrorText(response);
+      logStorageDebug('supabase-read failed', {
+        url,
+        status: response.status,
+        detail,
+      });
       if (response.status === 406 || response.status === 404) {
         return null;
       }
-      throw new Error(`Supabase read failed with ${response.status}`);
+      throw new Error(`Supabase read failed with ${response.status}${detail ? `: ${detail}` : ''}`);
     }
 
     const payload = await response.json();
+    logStorageDebug('supabase-read ok', {
+      url,
+      status: response.status,
+      rowCount: Array.isArray(payload) ? payload.length : 0,
+    });
     if (!Array.isArray(payload) || payload.length === 0) return null;
     return normalizeStatePayload(payload[0]);
   }
@@ -128,35 +181,36 @@
       Authorization: `Bearer ${config.key}`,
     };
 
-    const existingResponse = await fetch(`${config.url}/rest/v1/shared_map_state?select=id&limit=1`, {
-      headers: authHeaders,
-    });
-
-    if (!existingResponse.ok && existingResponse.status !== 406 && existingResponse.status !== 404) {
-      const detail = await existingResponse.text().catch(() => '');
-      throw new Error(`Supabase row lookup failed with ${existingResponse.status}${detail ? `: ${detail}` : ''}`);
+    let existingRows = [];
+    try {
+      const lookupPayload = await requestSupabaseJson(
+        `${config.url}/rest/v1/shared_map_state?select=id&limit=1`,
+        { headers: authHeaders },
+        'supabase-row-lookup'
+      );
+      existingRows = Array.isArray(lookupPayload) ? lookupPayload : [];
+    } catch (error) {
+      if (!String(error?.message || '').includes('406') && !String(error?.message || '').includes('404')) {
+        throw error;
+      }
+      existingRows = [];
     }
-
-    const existingRows = existingResponse.ok ? await existingResponse.json().catch(() => []) : [];
     const firstRow = Array.isArray(existingRows) ? existingRows[0] : null;
 
     if (firstRow && firstRow.id !== undefined && firstRow.id !== null) {
       const rowId = encodeURIComponent(String(firstRow.id));
-      const updateResponse = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.${rowId}`, {
-        method: 'PATCH',
-        headers: {
-          ...authHeaders,
-          Prefer: 'return=representation',
+      const updatedPayload = await requestSupabaseJson(
+        `${config.url}/rest/v1/shared_map_state?id=eq.${rowId}`,
+        {
+          method: 'PATCH',
+          headers: {
+            ...authHeaders,
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify({ statuses: nextStatuses }),
         },
-        body: JSON.stringify({ statuses: nextStatuses }),
-      });
-
-      if (!updateResponse.ok) {
-        const detail = await updateResponse.text().catch(() => '');
-        throw new Error(`Supabase update failed with ${updateResponse.status}${detail ? `: ${detail}` : ''}`);
-      }
-
-      const updatedPayload = await updateResponse.json().catch(() => []);
+        'supabase-update-existing-row'
+      );
       const updatedState = Array.isArray(updatedPayload) ? updatedPayload[0] : updatedPayload;
       return normalizeStatePayload(updatedState);
     }
@@ -174,6 +228,11 @@
     });
 
     if (!insertResponse.ok) {
+      const insertDetail = await readErrorText(insertResponse);
+      logStorageDebug('supabase-insert-default failed', {
+        status: insertResponse.status,
+        detail: insertDetail,
+      });
       // If insert with id default fails due id type mismatch, try insert with only statuses.
       if (insertResponse.status === 400) {
         const insertNoId = await fetch(`${config.url}/rest/v1/shared_map_state`, {
@@ -185,10 +244,16 @@
           body: JSON.stringify({ statuses: nextStatuses }),
         });
         if (insertNoId.ok) {
+          logStorageDebug('supabase-insert-without-id ok', { status: insertNoId.status });
           const noIdPayload = await insertNoId.json();
           const noIdState = Array.isArray(noIdPayload) ? noIdPayload[0] : noIdPayload;
           return normalizeStatePayload(noIdState);
         }
+        const noIdDetail = await readErrorText(insertNoId);
+        logStorageDebug('supabase-insert-without-id failed', {
+          status: insertNoId.status,
+          detail: noIdDetail,
+        });
       }
 
       // Another client may have created the row after our insert attempt.
@@ -197,6 +262,7 @@
           headers: authHeaders,
         });
         if (retryLookup.ok) {
+          logStorageDebug('supabase-retry-lookup ok', { status: retryLookup.status });
           const retryRows = await retryLookup.json().catch(() => []);
           const retryFirst = Array.isArray(retryRows) ? retryRows[0] : null;
           if (retryFirst && retryFirst.id !== undefined && retryFirst.id !== null) {
@@ -210,6 +276,7 @@
               body: JSON.stringify({ statuses: nextStatuses }),
             });
             if (retryUpdate.ok) {
+              logStorageDebug('supabase-retry-update ok', { status: retryUpdate.status });
               const retryPayload = await retryUpdate.json().catch(() => []);
               const retryState = Array.isArray(retryPayload) ? retryPayload[0] : retryPayload;
               return normalizeStatePayload(retryState);
@@ -221,10 +288,10 @@
         }
       }
 
-      const detail = await insertResponse.text().catch(() => '');
-      throw new Error(`Supabase insert failed with ${insertResponse.status}${detail ? `: ${detail}` : ''}`);
+      throw new Error(`Supabase insert failed with ${insertResponse.status}${insertDetail ? `: ${insertDetail}` : ''}`);
     }
 
+    logStorageDebug('supabase-insert-default ok', { status: insertResponse.status });
     const insertedPayload = await insertResponse.json();
     const insertedState = Array.isArray(insertedPayload) ? insertedPayload[0] : insertedPayload;
     return normalizeStatePayload(insertedState);
