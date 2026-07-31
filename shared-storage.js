@@ -82,7 +82,7 @@
     const config = getSupabaseConfig();
     if (!config) return null;
 
-    const response = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.default&select=id,statuses`, {
+    const response = await fetch(`${config.url}/rest/v1/shared_map_state?select=id,statuses&limit=1`, {
       headers: {
         'Content-Type': 'application/json',
         apikey: config.key,
@@ -91,26 +91,8 @@
     });
 
     if (!response.ok) {
-      // Some environments have a non-text id column, which makes id=eq.default invalid.
-      if (response.status === 400 || response.status === 406 || response.status === 404) {
-        const fallbackResponse = await fetch(`${config.url}/rest/v1/shared_map_state?select=id,statuses&limit=1`, {
-          headers: {
-            'Content-Type': 'application/json',
-            apikey: config.key,
-            Authorization: `Bearer ${config.key}`,
-          },
-        });
-
-        if (!fallbackResponse.ok) {
-          if (fallbackResponse.status === 406 || fallbackResponse.status === 404) {
-            return null;
-          }
-          throw new Error(`Supabase read fallback failed with ${fallbackResponse.status}`);
-        }
-
-        const fallbackPayload = await fallbackResponse.json();
-        if (!Array.isArray(fallbackPayload) || fallbackPayload.length === 0) return null;
-        return normalizeStatePayload(fallbackPayload[0]);
+      if (response.status === 406 || response.status === 404) {
+        return null;
       }
       throw new Error(`Supabase read failed with ${response.status}`);
     }
@@ -146,40 +128,37 @@
       Authorization: `Bearer ${config.key}`,
     };
 
-    const updateResponse = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.default`, {
-      method: 'PATCH',
-      headers: {
-        ...authHeaders,
-        Prefer: 'return=representation',
-      },
-      body: JSON.stringify({ statuses: nextStatuses }),
+    const existingResponse = await fetch(`${config.url}/rest/v1/shared_map_state?select=id&limit=1`, {
+      headers: authHeaders,
     });
 
-    if (!updateResponse.ok && updateResponse.status !== 400) {
-      const detail = await updateResponse.text().catch(() => '');
-      throw new Error(`Supabase update failed with ${updateResponse.status}${detail ? `: ${detail}` : ''}`);
+    if (!existingResponse.ok && existingResponse.status !== 406 && existingResponse.status !== 404) {
+      const detail = await existingResponse.text().catch(() => '');
+      throw new Error(`Supabase row lookup failed with ${existingResponse.status}${detail ? `: ${detail}` : ''}`);
     }
 
-    const updatedPayload = updateResponse.ok ? await updateResponse.json().catch(() => []) : [];
-    if (Array.isArray(updatedPayload) && updatedPayload.length > 0) {
-      return normalizeStatePayload(updatedPayload[0]);
-    }
+    const existingRows = existingResponse.ok ? await existingResponse.json().catch(() => []) : [];
+    const firstRow = Array.isArray(existingRows) ? existingRows[0] : null;
 
-    // Fallback for environments where id=eq.default is invalid (e.g., uuid id column).
-    const fallbackUpdate = await fetch(`${config.url}/rest/v1/shared_map_state`, {
-      method: 'PATCH',
-      headers: {
-        ...authHeaders,
-        Prefer: 'return=representation',
-      },
-      body: JSON.stringify({ statuses: nextStatuses }),
-    });
+    if (firstRow && firstRow.id !== undefined && firstRow.id !== null) {
+      const rowId = encodeURIComponent(String(firstRow.id));
+      const updateResponse = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.${rowId}`, {
+        method: 'PATCH',
+        headers: {
+          ...authHeaders,
+          Prefer: 'return=representation',
+        },
+        body: JSON.stringify({ statuses: nextStatuses }),
+      });
 
-    if (fallbackUpdate.ok) {
-      const fallbackPayload = await fallbackUpdate.json().catch(() => []);
-      if (Array.isArray(fallbackPayload) && fallbackPayload.length > 0) {
-        return normalizeStatePayload(fallbackPayload[0]);
+      if (!updateResponse.ok) {
+        const detail = await updateResponse.text().catch(() => '');
+        throw new Error(`Supabase update failed with ${updateResponse.status}${detail ? `: ${detail}` : ''}`);
       }
+
+      const updatedPayload = await updateResponse.json().catch(() => []);
+      const updatedState = Array.isArray(updatedPayload) ? updatedPayload[0] : updatedPayload;
+      return normalizeStatePayload(updatedState);
     }
 
     const insertResponse = await fetch(`${config.url}/rest/v1/shared_map_state`, {
@@ -212,24 +191,34 @@
         }
       }
 
-      // Another client may have created the row after our PATCH. Retry PATCH once.
+      // Another client may have created the row after our insert attempt.
       if (insertResponse.status === 409) {
-        const retryUpdate = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.default`, {
-          method: 'PATCH',
-          headers: {
-            ...authHeaders,
-            Prefer: 'return=representation',
-          },
-          body: JSON.stringify({ statuses: nextStatuses }),
+        const retryLookup = await fetch(`${config.url}/rest/v1/shared_map_state?select=id&limit=1`, {
+          headers: authHeaders,
         });
-        if (retryUpdate.ok) {
-          const retryPayload = await retryUpdate.json().catch(() => []);
-          const retryState = Array.isArray(retryPayload) ? retryPayload[0] : retryPayload;
-          return normalizeStatePayload(retryState);
-        }
+        if (retryLookup.ok) {
+          const retryRows = await retryLookup.json().catch(() => []);
+          const retryFirst = Array.isArray(retryRows) ? retryRows[0] : null;
+          if (retryFirst && retryFirst.id !== undefined && retryFirst.id !== null) {
+            const retryId = encodeURIComponent(String(retryFirst.id));
+            const retryUpdate = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.${retryId}`, {
+              method: 'PATCH',
+              headers: {
+                ...authHeaders,
+                Prefer: 'return=representation',
+              },
+              body: JSON.stringify({ statuses: nextStatuses }),
+            });
+            if (retryUpdate.ok) {
+              const retryPayload = await retryUpdate.json().catch(() => []);
+              const retryState = Array.isArray(retryPayload) ? retryPayload[0] : retryPayload;
+              return normalizeStatePayload(retryState);
+            }
 
-        const retryDetail = await retryUpdate.text().catch(() => '');
-        throw new Error(`Supabase retry update failed with ${retryUpdate.status}${retryDetail ? `: ${retryDetail}` : ''}`);
+            const retryDetail = await retryUpdate.text().catch(() => '');
+            throw new Error(`Supabase retry update failed with ${retryUpdate.status}${retryDetail ? `: ${retryDetail}` : ''}`);
+          }
+        }
       }
 
       const detail = await insertResponse.text().catch(() => '');
