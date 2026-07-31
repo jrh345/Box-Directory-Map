@@ -82,8 +82,7 @@
     const config = getSupabaseConfig();
     if (!config) return null;
 
-    const url = `${config.url}/rest/v1/shared_map_state?id=eq.default&select=id,statuses`;
-    const response = await fetch(url, {
+    const response = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.default&select=id,statuses`, {
       headers: {
         'Content-Type': 'application/json',
         apikey: config.key,
@@ -92,8 +91,26 @@
     });
 
     if (!response.ok) {
-      if (response.status === 406 || response.status === 404) {
-        return null;
+      // Some environments have a non-text id column, which makes id=eq.default invalid.
+      if (response.status === 400 || response.status === 406 || response.status === 404) {
+        const fallbackResponse = await fetch(`${config.url}/rest/v1/shared_map_state?select=id,statuses&limit=1`, {
+          headers: {
+            'Content-Type': 'application/json',
+            apikey: config.key,
+            Authorization: `Bearer ${config.key}`,
+          },
+        });
+
+        if (!fallbackResponse.ok) {
+          if (fallbackResponse.status === 406 || fallbackResponse.status === 404) {
+            return null;
+          }
+          throw new Error(`Supabase read fallback failed with ${fallbackResponse.status}`);
+        }
+
+        const fallbackPayload = await fallbackResponse.json();
+        if (!Array.isArray(fallbackPayload) || fallbackPayload.length === 0) return null;
+        return normalizeStatePayload(fallbackPayload[0]);
       }
       throw new Error(`Supabase read failed with ${response.status}`);
     }
@@ -138,14 +155,31 @@
       body: JSON.stringify({ statuses: nextStatuses }),
     });
 
-    if (!updateResponse.ok) {
+    if (!updateResponse.ok && updateResponse.status !== 400) {
       const detail = await updateResponse.text().catch(() => '');
       throw new Error(`Supabase update failed with ${updateResponse.status}${detail ? `: ${detail}` : ''}`);
     }
 
-    const updatedPayload = await updateResponse.json().catch(() => []);
+    const updatedPayload = updateResponse.ok ? await updateResponse.json().catch(() => []) : [];
     if (Array.isArray(updatedPayload) && updatedPayload.length > 0) {
       return normalizeStatePayload(updatedPayload[0]);
+    }
+
+    // Fallback for environments where id=eq.default is invalid (e.g., uuid id column).
+    const fallbackUpdate = await fetch(`${config.url}/rest/v1/shared_map_state`, {
+      method: 'PATCH',
+      headers: {
+        ...authHeaders,
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify({ statuses: nextStatuses }),
+    });
+
+    if (fallbackUpdate.ok) {
+      const fallbackPayload = await fallbackUpdate.json().catch(() => []);
+      if (Array.isArray(fallbackPayload) && fallbackPayload.length > 0) {
+        return normalizeStatePayload(fallbackPayload[0]);
+      }
     }
 
     const insertResponse = await fetch(`${config.url}/rest/v1/shared_map_state`, {
@@ -161,6 +195,23 @@
     });
 
     if (!insertResponse.ok) {
+      // If insert with id default fails due id type mismatch, try insert with only statuses.
+      if (insertResponse.status === 400) {
+        const insertNoId = await fetch(`${config.url}/rest/v1/shared_map_state`, {
+          method: 'POST',
+          headers: {
+            ...authHeaders,
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify({ statuses: nextStatuses }),
+        });
+        if (insertNoId.ok) {
+          const noIdPayload = await insertNoId.json();
+          const noIdState = Array.isArray(noIdPayload) ? noIdPayload[0] : noIdPayload;
+          return normalizeStatePayload(noIdState);
+        }
+      }
+
       // Another client may have created the row after our PATCH. Retry PATCH once.
       if (insertResponse.status === 409) {
         const retryUpdate = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.default`, {
