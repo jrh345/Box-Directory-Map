@@ -219,8 +219,12 @@ async function saveStatuses() {
   const persistSnapshot = async () => {
     try {
       await window.DriveAuditMapSharedStorage?.saveStatuses(snapshot);
+      window.__driveAuditLastSaveStatus = 'ok';
       updateSyncIndicator();
-    } catch {
+    } catch (error) {
+      window.__driveAuditLastSaveStatus = 'failed';
+      logDebug('Status save failed', { message: error?.message || 'Unknown save error' });
+      setResyncButtonText('Save failed', 2200);
       // Ignore shared storage failures and keep the local browser state as the fallback.
       updateSyncIndicator();
     }

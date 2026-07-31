@@ -122,65 +122,29 @@
 
     const config = getSupabaseConfig();
     if (!config) return null;
+    const nextStatuses = statuses && typeof statuses === 'object' ? statuses : {};
 
-    const readResponse = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.default&select=id`, {
+    const upsertResponse = await fetch(`${config.url}/rest/v1/shared_map_state?on_conflict=id`, {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         apikey: config.key,
         Authorization: `Bearer ${config.key}`,
+        Prefer: 'resolution=merge-duplicates,return=representation',
       },
-    });
-
-    if (!readResponse.ok && readResponse.status !== 406 && readResponse.status !== 404) {
-      throw new Error(`Supabase read failed with ${readResponse.status}`);
-    }
-
-    const existing = readResponse.ok ? await readResponse.json() : [];
-    const nextStatuses = statuses && typeof statuses === 'object' ? statuses : {};
-
-    if (!Array.isArray(existing) || existing.length === 0) {
-      const createPayload = {
+      body: JSON.stringify({
         id: 'default',
         statuses: nextStatuses,
         rows: [],
-      };
-
-      const createResponse = await fetch(`${config.url}/rest/v1/shared_map_state`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: config.key,
-          Authorization: `Bearer ${config.key}`,
-          Prefer: 'return=representation',
-        },
-        body: JSON.stringify(createPayload),
-      });
-
-      if (!createResponse.ok) {
-        throw new Error(`Supabase create failed with ${createResponse.status}`);
-      }
-
-      const createdPayload = await createResponse.json();
-      const createdState = Array.isArray(createdPayload) ? createdPayload[0] : createdPayload;
-      return normalizeStatePayload(createdState);
-    }
-
-    const updateResponse = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.default`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: config.key,
-        Authorization: `Bearer ${config.key}`,
-        Prefer: 'return=representation',
-      },
-      body: JSON.stringify({ statuses: nextStatuses }),
+      }),
     });
 
-    if (!updateResponse.ok) {
-      throw new Error(`Supabase update failed with ${updateResponse.status}`);
+    if (!upsertResponse.ok) {
+      const detail = await upsertResponse.text().catch(() => '');
+      throw new Error(`Supabase upsert failed with ${upsertResponse.status}${detail ? `: ${detail}` : ''}`);
     }
 
-    const updatedPayload = await updateResponse.json();
+    const updatedPayload = await upsertResponse.json();
     const updatedState = Array.isArray(updatedPayload) ? updatedPayload[0] : updatedPayload;
     return normalizeStatePayload(updatedState);
   }
@@ -233,7 +197,7 @@
       } catch (error) {
         setRuntimeInfo({ lastError: error?.message || 'Supabase write failed' });
         if (strictSupabaseMode) {
-          return null;
+          throw error;
         }
         // Ignore Supabase failures and fall back to API storage.
       }
@@ -257,7 +221,7 @@
       } catch (error) {
         setRuntimeInfo({ lastError: error?.message || 'Supabase write failed' });
         if (strictSupabaseMode) {
-          return null;
+          throw error;
         }
         // Ignore Supabase failures and fall back to API storage.
       }
