@@ -92,6 +92,11 @@
     return payload;
   }
 
+  const SUPABASE_NODE_STATUS_PAGE_SIZE = 1000;
+  const SUPABASE_NODE_STATUS_UPSERT_CHUNK = 500;
+  let supabaseNodeStatusesAvailable = null;
+  let lastSupabaseStatusesSnapshot = null;
+
   async function requestJson(url, options = {}) {
     const response = await fetch(url, options);
     if (!response.ok) {
@@ -119,9 +124,136 @@
     return { ...runtimeInfo };
   }
 
+  function buildSupabaseHeaders(config, extra = {}) {
+    return {
+      'Content-Type': 'application/json',
+      apikey: config.key,
+      Authorization: `Bearer ${config.key}`,
+      ...extra,
+    };
+  }
+
+  async function ensureNodeStatusesAvailability(config) {
+    if (supabaseNodeStatusesAvailable !== null) {
+      return supabaseNodeStatusesAvailable;
+    }
+
+    const url = `${config.url}/rest/v1/node_statuses?select=node_path,status&limit=1`;
+    const response = await fetch(url, {
+      headers: buildSupabaseHeaders(config),
+    });
+
+    if (response.ok) {
+      supabaseNodeStatusesAvailable = true;
+      logStorageDebug('supabase-node-statuses available', { status: response.status });
+      return true;
+    }
+
+    const detail = await readErrorText(response);
+    if (response.status === 404 && /node_statuses/i.test(detail)) {
+      supabaseNodeStatusesAvailable = false;
+      logStorageDebug('supabase-node-statuses unavailable', { status: response.status, detail });
+      return false;
+    }
+
+    logStorageDebug('supabase-node-statuses probe failed', {
+      status: response.status,
+      detail,
+    });
+    throw new Error(`Supabase node_statuses probe failed with ${response.status}${detail ? `: ${detail}` : ''}`);
+  }
+
+  async function fetchNodeStatusesFromSupabase(config) {
+    const statuses = {};
+    let from = 0;
+
+    while (true) {
+      const to = from + SUPABASE_NODE_STATUS_PAGE_SIZE - 1;
+      const url = `${config.url}/rest/v1/node_statuses?select=node_path,status&order=node_path.asc`;
+      const response = await fetch(url, {
+        headers: buildSupabaseHeaders(config, {
+          Range: `${from}-${to}`,
+        }),
+      });
+
+      if (!response.ok) {
+        const detail = await readErrorText(response);
+        throw new Error(`Supabase node_statuses read failed with ${response.status}${detail ? `: ${detail}` : ''}`);
+      }
+
+      const rows = await response.json().catch(() => []);
+      if (!Array.isArray(rows) || rows.length === 0) {
+        break;
+      }
+
+      rows.forEach((row) => {
+        const path = row?.node_path;
+        const status = row?.status;
+        if (!path || typeof path !== 'string') return;
+        if (status === 'green' || status === 'yellow' || status === 'red') {
+          statuses[path] = status;
+        }
+      });
+
+      if (rows.length < SUPABASE_NODE_STATUS_PAGE_SIZE) {
+        break;
+      }
+      from += SUPABASE_NODE_STATUS_PAGE_SIZE;
+    }
+
+    return statuses;
+  }
+
+  function buildChangedStatusRows(previousStatuses, nextStatuses) {
+    const rows = [];
+    const prev = previousStatuses && typeof previousStatuses === 'object' ? previousStatuses : {};
+    const next = nextStatuses && typeof nextStatuses === 'object' ? nextStatuses : {};
+    const keySet = new Set([...Object.keys(prev), ...Object.keys(next)]);
+
+    keySet.forEach((path) => {
+      const before = prev[path] || 'none';
+      const after = next[path] || 'none';
+      if (before === after) return;
+      rows.push({
+        node_path: path,
+        status: after,
+      });
+    });
+
+    return rows;
+  }
+
+  async function upsertNodeStatusesToSupabase(config, rows) {
+    if (!rows.length) return;
+
+    for (let index = 0; index < rows.length; index += SUPABASE_NODE_STATUS_UPSERT_CHUNK) {
+      const chunk = rows.slice(index, index + SUPABASE_NODE_STATUS_UPSERT_CHUNK);
+      await requestSupabaseJson(
+        `${config.url}/rest/v1/node_statuses?on_conflict=node_path`,
+        {
+          method: 'POST',
+          headers: buildSupabaseHeaders(config, {
+            Prefer: 'resolution=merge-duplicates,return=minimal',
+          }),
+          body: JSON.stringify(chunk),
+        },
+        'supabase-node-statuses-upsert'
+      );
+    }
+  }
+
   async function getStateFromSupabase() {
     const config = getSupabaseConfig();
     if (!config) return null;
+
+    if (await ensureNodeStatusesAvailability(config)) {
+      const rowStatuses = await fetchNodeStatusesFromSupabase(config);
+      lastSupabaseStatusesSnapshot = { ...rowStatuses };
+      logStorageDebug('supabase-node-statuses read complete', {
+        count: Object.keys(rowStatuses).length,
+      });
+      return { statuses: rowStatuses, rows: [] };
+    }
 
     const url = `${config.url}/rest/v1/shared_map_state?select=id,statuses&limit=1`;
     const response = await fetch(url, {
@@ -152,7 +284,9 @@
       rowCount: Array.isArray(payload) ? payload.length : 0,
     });
     if (!Array.isArray(payload) || payload.length === 0) return null;
-    return normalizeStatePayload(payload[0]);
+    const state = normalizeStatePayload(payload[0]);
+    lastSupabaseStatusesSnapshot = { ...(state.statuses || {}) };
+    return state;
   }
 
   async function saveStatusesToApi(statuses) {
@@ -175,6 +309,22 @@
     const config = getSupabaseConfig();
     if (!config) return null;
     const nextStatuses = statuses && typeof statuses === 'object' ? statuses : {};
+
+    if (await ensureNodeStatusesAvailability(config)) {
+      if (!lastSupabaseStatusesSnapshot) {
+        lastSupabaseStatusesSnapshot = await fetchNodeStatusesFromSupabase(config);
+      }
+
+      const changedRows = buildChangedStatusRows(lastSupabaseStatusesSnapshot, nextStatuses);
+      await upsertNodeStatusesToSupabase(config, changedRows);
+      lastSupabaseStatusesSnapshot = { ...nextStatuses };
+      logStorageDebug('supabase-node-statuses write complete', {
+        changedRows: changedRows.length,
+        statusCount: Object.keys(nextStatuses).length,
+      });
+      return { statuses: nextStatuses, rows: [] };
+    }
+
     const authHeaders = {
       'Content-Type': 'application/json',
       apikey: config.key,

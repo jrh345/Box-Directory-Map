@@ -127,6 +127,38 @@ values ('default', '{}'::jsonb, '[]'::jsonb)
 on conflict (id) do nothing;
 ```
 
+For large maps, also create `node_statuses` (recommended). The app will auto-use it when present and write in chunks, which avoids oversized JSON payload errors:
+
+```sql
+create table if not exists public.node_statuses (
+  node_path text primary key,
+  status text not null,
+  updated_at timestamptz not null default now(),
+  constraint node_statuses_status_check check (status in ('green', 'yellow', 'red', 'none'))
+);
+
+alter table public.node_statuses enable row level security;
+
+create policy "node_statuses_select_all"
+on public.node_statuses
+for select
+to anon, authenticated
+using (true);
+
+create policy "node_statuses_insert_all"
+on public.node_statuses
+for insert
+to anon, authenticated
+with check (true);
+
+create policy "node_statuses_update_all"
+on public.node_statuses
+for update
+to anon, authenticated
+using (true)
+with check (true);
+```
+
 2. Configure runtime values in `config.js`:
 
 ```js
