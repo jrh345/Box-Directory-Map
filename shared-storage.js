@@ -223,6 +223,23 @@
     return rows;
   }
 
+  function buildNodeStatusRowsFromSnapshot(statuses) {
+    const rows = [];
+    const source = statuses && typeof statuses === 'object' ? statuses : {};
+
+    Object.entries(source).forEach(([path, status]) => {
+      if (!path || typeof path !== 'string') return;
+      if (status === 'green' || status === 'yellow' || status === 'red' || status === 'none') {
+        rows.push({
+          node_path: path,
+          status,
+        });
+      }
+    });
+
+    return rows;
+  }
+
   async function upsertNodeStatusesToSupabase(config, rows) {
     if (!rows.length) return;
 
@@ -242,19 +259,7 @@
     }
   }
 
-  async function getStateFromSupabase() {
-    const config = getSupabaseConfig();
-    if (!config) return null;
-
-    if (await ensureNodeStatusesAvailability(config)) {
-      const rowStatuses = await fetchNodeStatusesFromSupabase(config);
-      lastSupabaseStatusesSnapshot = { ...rowStatuses };
-      logStorageDebug('supabase-node-statuses read complete', {
-        count: Object.keys(rowStatuses).length,
-      });
-      return { statuses: rowStatuses, rows: [] };
-    }
-
+  async function getLegacyStateFromSupabase(config) {
     const url = `${config.url}/rest/v1/shared_map_state?select=id,statuses&limit=1`;
     const response = await fetch(url, {
       headers: {
@@ -287,6 +292,43 @@
     const state = normalizeStatePayload(payload[0]);
     lastSupabaseStatusesSnapshot = { ...(state.statuses || {}) };
     return state;
+  }
+
+  async function getStateFromSupabase() {
+    const config = getSupabaseConfig();
+    if (!config) return null;
+
+    if (await ensureNodeStatusesAvailability(config)) {
+      const rowStatuses = await fetchNodeStatusesFromSupabase(config);
+      const rowStatusCount = Object.keys(rowStatuses).length;
+
+      if (rowStatusCount > 0) {
+        lastSupabaseStatusesSnapshot = { ...rowStatuses };
+        logStorageDebug('supabase-node-statuses read complete', {
+          count: rowStatusCount,
+        });
+        return { statuses: rowStatuses, rows: [] };
+      }
+
+      const legacyState = await getLegacyStateFromSupabase(config);
+      const legacyStatuses = legacyState?.statuses || {};
+      const legacyCount = Object.keys(legacyStatuses).length;
+      if (legacyCount > 0) {
+        const seedRows = buildNodeStatusRowsFromSnapshot(legacyStatuses);
+        await upsertNodeStatusesToSupabase(config, seedRows);
+        lastSupabaseStatusesSnapshot = { ...legacyStatuses };
+        logStorageDebug('supabase-node-statuses backfilled from shared_map_state', {
+          seededRows: seedRows.length,
+        });
+        return { statuses: legacyStatuses, rows: [] };
+      }
+
+      lastSupabaseStatusesSnapshot = {};
+      logStorageDebug('supabase-node-statuses is empty and no legacy statuses found', {});
+      return { statuses: {}, rows: [] };
+    }
+
+    return getLegacyStateFromSupabase(config);
   }
 
   async function saveStatusesToApi(statuses) {
