@@ -123,30 +123,71 @@
     const config = getSupabaseConfig();
     if (!config) return null;
     const nextStatuses = statuses && typeof statuses === 'object' ? statuses : {};
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      apikey: config.key,
+      Authorization: `Bearer ${config.key}`,
+    };
 
-    const upsertResponse = await fetch(`${config.url}/rest/v1/shared_map_state?on_conflict=id`, {
+    const updateResponse = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.default`, {
+      method: 'PATCH',
+      headers: {
+        ...authHeaders,
+        Prefer: 'return=representation',
+      },
+      body: JSON.stringify({ statuses: nextStatuses }),
+    });
+
+    if (!updateResponse.ok) {
+      const detail = await updateResponse.text().catch(() => '');
+      throw new Error(`Supabase update failed with ${updateResponse.status}${detail ? `: ${detail}` : ''}`);
+    }
+
+    const updatedPayload = await updateResponse.json().catch(() => []);
+    if (Array.isArray(updatedPayload) && updatedPayload.length > 0) {
+      return normalizeStatePayload(updatedPayload[0]);
+    }
+
+    const insertResponse = await fetch(`${config.url}/rest/v1/shared_map_state`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        apikey: config.key,
-        Authorization: `Bearer ${config.key}`,
-        Prefer: 'resolution=merge-duplicates,return=representation',
+        ...authHeaders,
+        Prefer: 'return=representation',
       },
       body: JSON.stringify({
         id: 'default',
         statuses: nextStatuses,
-        rows: [],
       }),
     });
 
-    if (!upsertResponse.ok) {
-      const detail = await upsertResponse.text().catch(() => '');
-      throw new Error(`Supabase upsert failed with ${upsertResponse.status}${detail ? `: ${detail}` : ''}`);
+    if (!insertResponse.ok) {
+      // Another client may have created the row after our PATCH. Retry PATCH once.
+      if (insertResponse.status === 409) {
+        const retryUpdate = await fetch(`${config.url}/rest/v1/shared_map_state?id=eq.default`, {
+          method: 'PATCH',
+          headers: {
+            ...authHeaders,
+            Prefer: 'return=representation',
+          },
+          body: JSON.stringify({ statuses: nextStatuses }),
+        });
+        if (retryUpdate.ok) {
+          const retryPayload = await retryUpdate.json().catch(() => []);
+          const retryState = Array.isArray(retryPayload) ? retryPayload[0] : retryPayload;
+          return normalizeStatePayload(retryState);
+        }
+
+        const retryDetail = await retryUpdate.text().catch(() => '');
+        throw new Error(`Supabase retry update failed with ${retryUpdate.status}${retryDetail ? `: ${retryDetail}` : ''}`);
+      }
+
+      const detail = await insertResponse.text().catch(() => '');
+      throw new Error(`Supabase insert failed with ${insertResponse.status}${detail ? `: ${detail}` : ''}`);
     }
 
-    const updatedPayload = await upsertResponse.json();
-    const updatedState = Array.isArray(updatedPayload) ? updatedPayload[0] : updatedPayload;
-    return normalizeStatePayload(updatedState);
+    const insertedPayload = await insertResponse.json();
+    const insertedState = Array.isArray(insertedPayload) ? insertedPayload[0] : insertedPayload;
+    return normalizeStatePayload(insertedState);
   }
 
   const adapter = {
