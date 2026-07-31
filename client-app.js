@@ -183,6 +183,13 @@ async function syncStatusesFromServer(options = {}) {
 
   try {
     const sharedState = await window.DriveAuditMapSharedStorage?.getState();
+
+    // A local edit may have started saving while this fetch was in flight.
+    // Applying what we just fetched now would clobber it, so bail out and
+    // let the next poll cycle pick up the merged state instead.
+    if (!ignoreWriteGuard && (pendingStatusSaves > 0 || Date.now() < syncBlockedUntilMs)) {
+      return false;
+    }
     const sharedStatuses = sharedState?.statuses;
     if (sharedStatuses && typeof sharedStatuses === 'object') {
       const canApply = allowEmpty || Object.keys(sharedStatuses).length > 0;
