@@ -1210,7 +1210,6 @@ function renderCurrentView() {
     const filteredView = buildFilteredViewData();
     updatePreviewSummary(filteredView);
     renderMap(filteredView.nodes, { readOnly: true });
-    fitViewToNodes(filteredView.nodes, { readOnly: true });
     return;
   }
 
@@ -1414,9 +1413,7 @@ fitViewButton?.addEventListener('click', () => {
 });
 
 window.addEventListener('resize', () => {
-  if (activeViewMode === 'preview' && currentRenderedNodes.length > 0) {
-    fitViewToNodes(currentRenderedNodes, { readOnly: true });
-  }
+  // Keep viewport stable across modes; fitting is explicit via the Fit view button.
 });
 
 shareButton?.addEventListener('click', () => {
